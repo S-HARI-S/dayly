@@ -16,7 +16,7 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +29,7 @@ class MyApp extends StatelessWidget {
 }
 
 class DrawingBoard extends StatefulWidget {
-  const DrawingBoard({Key? key}) : super(key: key);
+  const DrawingBoard({super.key});
 
   @override
   State<DrawingBoard> createState() => _DrawingBoardState();
@@ -104,16 +104,15 @@ class _DrawingBoardState extends State<DrawingBoard> {
                   panEnabled: _pointerCount >= 2,
                   scaleEnabled: _pointerCount >= 2,
                   constrained: false,
-                    child: Center(
                       child: Container(
                         width: 100000,
                         height: 100000,
+                        alignment: Alignment.center,
                         color: Colors.white,
-                        child: const DrawingCanvas(),
+                        child: DrawingCanvas(isPanning: _pointerCount >= 2),
                       ),
                     ),
                   ),
-                ),
             ],
           ),
           
@@ -225,12 +224,12 @@ class ToolButton extends StatelessWidget {
   final String tooltip;
 
   const ToolButton({
-    Key? key,
+    super.key,
     required this.icon,
     required this.isSelected,
     required this.onPressed,
     required this.tooltip,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

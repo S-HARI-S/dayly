@@ -1,6 +1,5 @@
 // lib/providers/drawing_provider.dart
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../models/element.dart';
 import '../models/pen_element.dart';
 // Import other element types
