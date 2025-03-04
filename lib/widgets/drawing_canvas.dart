@@ -14,7 +14,7 @@ class DrawingCanvas extends StatefulWidget {
 class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? _lastPosition;
   int _activePointers = 0;
-  
+
   @override
   Widget build(BuildContext context) {
     return Consumer<DrawingProvider>(
@@ -24,24 +24,54 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             setState(() {
               _activePointers++;
             });
-            
-            // Only start drawing if exactly one finger is used and not panning
+
             if (_activePointers == 1 && !widget.isPanning) {
               if (drawingProvider.currentTool == ElementType.pen) {
                 drawingProvider.startDrawing(event.localPosition);
+              } else if (drawingProvider.currentTool == ElementType.text) {
+                // Open a dialog for text input
+                showDialog(
+                  context: context,
+                  builder: (context) {
+                    final controller = TextEditingController();
+                    return AlertDialog(
+                      title: const Text("Enter Text"),
+                      content: TextField(
+                        controller: controller,
+                        decoration: const InputDecoration(
+                          hintText: "Type your text here",
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            // Call the provider method to add a text element
+                            drawingProvider.addTextElement(
+                              controller.text,
+                              event.localPosition,
+                            );
+                            Navigator.of(context).pop();
+                          },
+                          child: const Text("Add"),
+                        ),
+                      ],
+                    );
+                  },
+                );
               } else {
                 drawingProvider.selectElementAt(event.localPosition);
                 _lastPosition = event.localPosition;
               }
             }
           },
+
           onPointerMove: (PointerMoveEvent event) {
             // Only update drawing if exactly one finger is active and not panning
             if (_activePointers == 1 && !widget.isPanning) {
               if (drawingProvider.currentTool == ElementType.pen) {
                 drawingProvider.updateDrawing(event.localPosition);
-              } else if (_lastPosition != null && 
-                        drawingProvider.selectedElementIds.isNotEmpty) {
+              } else if (_lastPosition != null &&
+                  drawingProvider.selectedElementIds.isNotEmpty) {
                 final delta = event.localPosition - _lastPosition!;
                 drawingProvider.moveSelected(delta);
                 _lastPosition = event.localPosition;
@@ -52,7 +82,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             setState(() {
               _activePointers = _activePointers > 0 ? _activePointers - 1 : 0;
             });
-            
+
             // Only finish drawing if no fingers are left and not panning
             if (_activePointers == 0 && !widget.isPanning) {
               if (drawingProvider.currentTool == ElementType.pen) {
@@ -73,7 +103,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               currentElement: drawingProvider.currentElement,
             ),
             child: Container(
-              width: double.infinity, 
+              width: double.infinity,
               height: double.infinity,
               color: Colors.transparent,
             ),
@@ -84,15 +114,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 }
 
-
 class DrawingPainter extends CustomPainter {
   final List<DrawingElement> elements;
   final DrawingElement? currentElement;
 
-  DrawingPainter({
-    required this.elements,
-    this.currentElement,
-  });
+  DrawingPainter({required this.elements, this.currentElement});
 
   @override
   void paint(Canvas canvas, Size size) {
