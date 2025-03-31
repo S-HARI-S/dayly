@@ -38,7 +38,7 @@ class DrawingBoard extends StatefulWidget {
 class _DrawingBoardState extends State<DrawingBoard> {
   // Track the number of active pointers
   int _pointerCount = 0;
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -47,27 +47,46 @@ class _DrawingBoardState extends State<DrawingBoard> {
         actions: [
           IconButton(
             icon: const Icon(Icons.undo),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).undo(),
+            onPressed:
+                () =>
+                    Provider.of<DrawingProvider>(context, listen: false).undo(),
             tooltip: 'Undo',
           ),
           IconButton(
             icon: const Icon(Icons.redo),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).redo(),
+            onPressed:
+                () =>
+                    Provider.of<DrawingProvider>(context, listen: false).redo(),
             tooltip: 'Redo',
           ),
           IconButton(
             icon: const Icon(Icons.delete),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).deleteSelected(),
+            onPressed:
+                () =>
+                    Provider.of<DrawingProvider>(
+                      context,
+                      listen: false,
+                    ).deleteSelected(),
             tooltip: 'Delete Selected',
           ),
           IconButton(
             icon: const Icon(Icons.group_work),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).groupSelected(),
+            onPressed:
+                () =>
+                    Provider.of<DrawingProvider>(
+                      context,
+                      listen: false,
+                    ).groupSelected(),
             tooltip: 'Group Selected',
           ),
           IconButton(
             icon: const Icon(Icons.call_split),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).ungroupSelected(),
+            onPressed:
+                () =>
+                    Provider.of<DrawingProvider>(
+                      context,
+                      listen: false,
+                    ).ungroupSelected(),
             tooltip: 'Ungroup Selected',
           ),
         ],
@@ -104,18 +123,18 @@ class _DrawingBoardState extends State<DrawingBoard> {
                   panEnabled: _pointerCount >= 2,
                   scaleEnabled: _pointerCount >= 2,
                   constrained: false,
-                      child: Container(
-                        width: 100000,
-                        height: 100000,
-                        alignment: Alignment.center,
-                        color: Colors.white,
-                        child: DrawingCanvas(isPanning: _pointerCount >= 2),
-                      ),
-                    ),
+                  child: Container(
+                    width: 100000,
+                    height: 100000,
+                    alignment: Alignment.center,
+                    color: Colors.white,
+                    child: DrawingCanvas(isPanning: _pointerCount >= 2),
                   ),
+                ),
+              ),
             ],
           ),
-          
+
           // Tool palette
           Positioned(
             left: 16,
@@ -124,34 +143,66 @@ class _DrawingBoardState extends State<DrawingBoard> {
               builder: (context, drawingProvider, child) {
                 return Column(
                   children: [
+                    // Update in lib/main.dart
+
+                    // Add these lines in the toolbar Column in _DrawingBoardState
+                    ToolButton(
+                      icon: Icons.image,
+                      isSelected: false,
+                      onPressed:
+                          () => Provider.of<DrawingProvider>(
+                            context,
+                            listen: false,
+                          ).addImageFromGallery(context),
+                      tooltip: 'Add Image',
+                    ),
+                    ToolButton(
+                      icon: Icons.videocam,
+                      isSelected: false,
+                      onPressed:
+                          () => Provider.of<DrawingProvider>(
+                            context,
+                            listen: false,
+                          ).addVideoFromGallery(context),
+                      tooltip: 'Add Video',
+                    ),
                     ToolButton(
                       icon: Icons.edit,
-                      isSelected: drawingProvider.currentTool == ElementType.pen,
+                      isSelected:
+                          drawingProvider.currentTool == ElementType.pen,
                       onPressed: () => drawingProvider.setTool(ElementType.pen),
                       tooltip: 'Pen Tool',
                     ),
                     ToolButton(
                       icon: Icons.rectangle_outlined,
-                      isSelected: drawingProvider.currentTool == ElementType.rectangle,
-                      onPressed: () => drawingProvider.setTool(ElementType.rectangle),
+                      isSelected:
+                          drawingProvider.currentTool == ElementType.rectangle,
+                      onPressed:
+                          () => drawingProvider.setTool(ElementType.rectangle),
                       tooltip: 'Rectangle Tool',
                     ),
                     ToolButton(
                       icon: Icons.circle_outlined,
-                      isSelected: drawingProvider.currentTool == ElementType.circle,
-                      onPressed: () => drawingProvider.setTool(ElementType.circle),
+                      isSelected:
+                          drawingProvider.currentTool == ElementType.circle,
+                      onPressed:
+                          () => drawingProvider.setTool(ElementType.circle),
                       tooltip: 'Circle Tool',
                     ),
                     ToolButton(
                       icon: Icons.arrow_forward,
-                      isSelected: drawingProvider.currentTool == ElementType.arrow,
-                      onPressed: () => drawingProvider.setTool(ElementType.arrow),
+                      isSelected:
+                          drawingProvider.currentTool == ElementType.arrow,
+                      onPressed:
+                          () => drawingProvider.setTool(ElementType.arrow),
                       tooltip: 'Arrow Tool',
                     ),
                     ToolButton(
                       icon: Icons.text_fields,
-                      isSelected: drawingProvider.currentTool == ElementType.text,
-                      onPressed: () => drawingProvider.setTool(ElementType.text),
+                      isSelected:
+                          drawingProvider.currentTool == ElementType.text,
+                      onPressed:
+                          () => drawingProvider.setTool(ElementType.text),
                       tooltip: 'Text Tool',
                     ),
                     const SizedBox(height: 16),
@@ -197,7 +248,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
               },
             ),
           ),
-          
+
           // Add debug info for testing
           Positioned(
             bottom: 10,

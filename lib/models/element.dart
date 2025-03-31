@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
-enum ElementType { pen, rectangle, circle, arrow, text }
+// lib/models/element.dart (updated)
+enum ElementType { pen, rectangle, circle, arrow, text, image, video }
 
 abstract class DrawingElement {
   final String id;

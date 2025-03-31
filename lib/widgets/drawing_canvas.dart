@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart'; // Add this for PointerDeviceKind
 import 'package:provider/provider.dart';
 import '../providers/drawing_provider.dart';
 import '../models/element.dart';
+import '../models/video_element.dart'; // Add this import
 
 class DrawingCanvas extends StatefulWidget {
   final bool isPanning;
@@ -59,6 +61,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   },
                 );
               } else {
+                // Check for double-tap on video elements to toggle play/pause
+                for (int i = drawingProvider.elements.length - 1; i >= 0; i--) {
+                  final element = drawingProvider.elements[i];
+                  if (element is VideoElement && element.containsPoint(event.localPosition)) {
+                    drawingProvider.toggleVideoPlayback(element.id);
+                    return;
+                  }
+                }
+                
                 drawingProvider.selectElementAt(event.localPosition);
                 _lastPosition = event.localPosition;
               }
