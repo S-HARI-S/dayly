@@ -482,6 +482,25 @@ class DrawingProvider extends ChangeNotifier {
     }
   }
 
+  // --- Calendar Integration ---
+  
+  // Load elements from a calendar entry
+  void loadElements(List<DrawingElement> loadedElements) {
+    // Clean up any existing elements (especially videos)
+    for (final element in elements) {
+      if (element is VideoElement) {
+        element.dispose();
+      }
+    }
+    
+    // Replace with loaded elements
+    elements = loadedElements;
+    selectedElementIds.clear();
+    currentElement = null;
+    
+    notifyListeners();
+  }
+
   // --- Cleanup ---
   @override
   void dispose() {

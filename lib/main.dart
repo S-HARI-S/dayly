@@ -3,13 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'providers/drawing_provider.dart';
+import 'providers/calendar_provider.dart'; // Added import
 import 'widgets/drawing_canvas.dart';
+import 'screens/calendar_screen.dart'; // Added import
 import 'models/element.dart'; // Base element type
 
 void main() {
   runApp(
     MultiProvider(
-      providers: [ChangeNotifierProvider(create: (_) => DrawingProvider())],
+      providers: [
+        ChangeNotifierProvider(create: (_) => DrawingProvider()),
+        ChangeNotifierProvider(create: (_) => CalendarProvider()), // Added provider
+      ],
       child: const MyApp(),
     ),
   );
@@ -74,6 +79,18 @@ class _DrawingBoardState extends State<DrawingBoard> {
       appBar: AppBar(
         title: const Text('Flutter Drawing App'),
         actions: [
+          // Calendar View Button
+          IconButton(
+            icon: const Icon(Icons.calendar_today),
+            onPressed: () => _navigateToCalendar(),
+            tooltip: 'Calendar View',
+          ),
+          // Save Button
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: () => _saveCurrentCanvas(),
+            tooltip: 'Save Canvas',
+          ),
           // Select Tool (Moved to Tool Palette)
           // IconButton(
           //   icon: const Icon(Icons.pan_tool_alt_outlined),
@@ -248,6 +265,36 @@ class _DrawingBoardState extends State<DrawingBoard> {
           ),
         ],
       ),
+    );
+  }
+
+  // Navigate to calendar screen
+  void _navigateToCalendar() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const CalendarScreen(),
+      ),
+    );
+  }
+
+  // Save current canvas to calendar
+  void _saveCurrentCanvas() async {
+    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+    final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
+    
+    // Check if there's anything to save
+    if (drawingProvider.elements.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to save - canvas is empty'))
+      );
+      return;
+    }
+    
+    // Save the current drawing to the current date
+    await calendarProvider.saveCurrentDrawing(drawingProvider);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Canvas saved to calendar'))
     );
   }
 

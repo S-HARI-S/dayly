@@ -120,4 +120,41 @@ class VideoElement extends DrawingElement {
       size: size,
     );
   }
+  
+  // --- Serialization Methods ---
+  
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'position': {'dx': position.dx, 'dy': position.dy},
+      'isSelected': isSelected,
+      'size': {'width': size.width, 'height': size.height},
+      'videoUrl': videoUrl,
+      // We don't serialize the controller - it will be recreated on load
+    };
+  }
+  
+  // Similar to ImageElement, this can't be fully deserialized without async operations
+  static VideoElement fromMap(Map<String, dynamic> map) {
+    // Parse position
+    final posMap = map['position'];
+    final position = Offset(
+      posMap['dx'] as double, 
+      posMap['dy'] as double
+    );
+    
+    // Parse size
+    final sizeMap = map['size'];
+    final size = Size(
+      sizeMap['width'] as double,
+      sizeMap['height'] as double
+    );
+    
+    // Note: Can't create the controller here since it requires async initialization
+    throw UnimplementedError(
+      'VideoElement.fromMap requires creating a VideoPlayerController, which is an async operation. '
+      'The video URL is: ${map['videoUrl']}. This should be handled by a provider.'
+    );
+  }
 }

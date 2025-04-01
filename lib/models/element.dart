@@ -57,6 +57,15 @@ abstract class DrawingElement {
   // Should return Rect.zero or similar if bounds cannot be determined.
   Rect get bounds;
 
+  // Abstract method for serialization - converts element to a map
+  Map<String, dynamic> toMap();
+  
+  // Optional static method to create an element from map data
+  // This will be implemented in each concrete subclass
+  // static DrawingElement fromMap(Map<String, dynamic> map) {
+  //   // Implementation in subclasses
+  // }
+
   // Optional: Override equality operator and hashCode if elements need to be compared directly
   // (e.g., if used in Sets or as Map keys, or for more robust shouldRepaint checks)
   // @override
@@ -72,3 +81,5 @@ abstract class DrawingElement {
   // @override
   // int get hashCode => id.hashCode ^ position.hashCode ^ isSelected.hashCode; // Combine relevant properties
 }
+
+

@@ -7,6 +7,7 @@ import 'element.dart';
 class ImageElement extends DrawingElement {
   final ui.Image image; // The actual image data
   final Size size; // Display size of the image on the canvas
+  final String? imagePath; // Path to the image file for serialization
 
   ImageElement({
     String? id,
@@ -14,6 +15,7 @@ class ImageElement extends DrawingElement {
     bool isSelected = false,
     required this.image,
     required this.size,
+    this.imagePath,
   }) : super(id: id, type: ElementType.image, position: position, isSelected: isSelected);
 
   // --- DrawingElement Overrides ---
@@ -50,14 +52,16 @@ class ImageElement extends DrawingElement {
     Offset? position,
     bool? isSelected,
     ui.Image? image, // Allow replacing image if needed
-    Size? size,       // Allow resizing
+    Size? size,      // Allow resizing
+    String? imagePath,
   }) {
     return ImageElement(
       id: id ?? this.id,
       position: position ?? this.position,
       isSelected: isSelected ?? this.isSelected,
       image: image ?? this.image, // Keep original image by default
-      size: size ?? this.size,       // Keep original size by default
+      size: size ?? this.size,    // Keep original size by default
+      imagePath: imagePath ?? this.imagePath,
     );
   }
 
@@ -71,6 +75,45 @@ class ImageElement extends DrawingElement {
       isSelected: false, // Selection is transient
       image: image, // Copy reference
       size: size,
+      imagePath: imagePath,
+    );
+  }
+  
+  // --- Serialization Methods ---
+  
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'position': {'dx': position.dx, 'dy': position.dy},
+      'isSelected': isSelected,
+      'size': {'width': size.width, 'height': size.height},
+      'imagePath': imagePath,
+    };
+  }
+  
+  // This static method will need UI interaction to load the actual image
+  // The full implementation would need to load the image from the path
+  static ImageElement fromMap(Map<String, dynamic> map) {
+    // Parse position
+    final posMap = map['position'];
+    final position = Offset(
+      posMap['dx'] as double, 
+      posMap['dy'] as double
+    );
+    
+    // Parse size
+    final sizeMap = map['size'];
+    final size = Size(
+      sizeMap['width'] as double,
+      sizeMap['height'] as double
+    );
+    
+    // Note: We can't fully deserialize here without loading the image,
+    // which requires asynchronous code. We'd typically handle this in DrawingProvider.
+    throw UnimplementedError(
+      'ImageElement.fromMap requires loading an image, which is an async operation. '
+      'The image path is: ${map['imagePath']}. This should be handled by a provider.'
     );
   }
 }

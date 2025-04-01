@@ -155,4 +155,44 @@ class PenElement extends DrawingElement {
       strokeWidth: strokeWidth,
     );
   }
+  
+  // --- Serialization Methods ---
+  
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'position': {'dx': position.dx, 'dy': position.dy},
+      'isSelected': isSelected,
+      'color': color.value, // Store color as integer value
+      'strokeWidth': strokeWidth,
+      'points': points.map((p) => {'dx': p.dx, 'dy': p.dy}).toList(),
+    };
+  }
+  
+  static PenElement fromMap(Map<String, dynamic> map) {
+    // Parse position
+    final posMap = map['position'];
+    final position = Offset(
+      posMap['dx'] as double, 
+      posMap['dy'] as double
+    );
+    
+    // Parse points
+    final pointsList = (map['points'] as List)
+        .map((pointMap) => Offset(
+              pointMap['dx'] as double,
+              pointMap['dy'] as double,
+            ))
+        .toList();
+    
+    return PenElement(
+      id: map['id'],
+      position: position,
+      isSelected: map['isSelected'] ?? false,
+      color: Color(map['color']),
+      strokeWidth: map['strokeWidth'],
+      points: pointsList,
+    );
+  }
 }

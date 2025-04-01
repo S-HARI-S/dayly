@@ -108,4 +108,36 @@ class TextElement extends DrawingElement {
       fontSize: fontSize,
     );
   }
+  
+  // --- Serialization Methods ---
+  
+  @override
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'position': {'dx': position.dx, 'dy': position.dy},
+      'isSelected': isSelected,
+      'text': text,
+      'color': color.value, // Store color as integer value
+      'fontSize': fontSize,
+    };
+  }
+  
+  static TextElement fromMap(Map<String, dynamic> map) {
+    // Parse position
+    final posMap = map['position'];
+    final position = Offset(
+      posMap['dx'] as double, 
+      posMap['dy'] as double
+    );
+    
+    return TextElement(
+      id: map['id'],
+      position: position,
+      isSelected: map['isSelected'] ?? false,
+      text: map['text'],
+      color: Color(map['color']),
+      fontSize: map['fontSize'] ?? 24.0,
+    );
+  }
 }

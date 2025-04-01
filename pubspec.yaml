@@ -16,6 +16,10 @@ dependencies:
   provider: ^6.1.2 # Latest stable version (check pub.dev)
   flutter_colorpicker: ^1.1.0 # Latest stable version
 
+  # --- Calendar & Formatting ---
+  table_calendar: ^3.1.0 # For calendar UI
+  intl: ^0.19.0 # For date formatting
+
   # --- Media ---
   image_picker: ^1.1.2 # Latest stable version
   video_player: ^2.8.7 # Latest stable version
@@ -23,13 +27,14 @@ dependencies:
   # --- Utilities ---
   vector_math: ^2.1.4 # Latest stable version (usually stable)
   collection: ^1.18.0 # Recommended for listEquals, firstWhereOrNull etc.
+  path_provider: ^2.1.5 # For accessing device file system
+  uuid: ^4.5.1 # For generating unique IDs
 
   # --- Icons ---
   cupertino_icons: ^1.0.8 # Latest stable version (usually stable)
 
   # --- Add back other dependencies if you were using them ---
   # perfect_freehand: ^2.1.1 # If you were using this for smoother freehand drawing
-  # uuid: ^4.4.0 # If you were using this for ID generation
 
 dev_dependencies:
   flutter_test:
