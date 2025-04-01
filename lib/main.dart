@@ -7,6 +7,7 @@ import 'providers/calendar_provider.dart';
 import 'widgets/drawing_canvas.dart';
 import 'screens/calendar_screen.dart';
 import 'models/element.dart';
+import 'models/calendar_entry.dart';
 
 void main() {
   runApp(
@@ -49,6 +50,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
   int _pointerCount = 0;
   late TransformationController _transformationController;
   bool _isNewCanvas = true;
+  bool _isSaved = false; // Add a new flag to track if the canvas is saved
 
   @override
   void initState() {
@@ -127,6 +129,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
               if (_isNewCanvas) {
                 _isNewCanvas = false;
               }
+              _isSaved = false; // Mark as unsaved when user interacts with canvas
             },
             onPointerUp: (PointerUpEvent event) {
               setState(() {
@@ -212,6 +215,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
                           isSelected: false, // Not a persistent tool
                           onPressed: () { 
                             _isNewCanvas = false; // Mark as edited when adding media
+                            _isSaved = false; // Mark as unsaved when adding media
                             Provider.of<DrawingProvider>(context, listen: false)
                               .addImageFromGallery(context, _transformationController); 
                           },
@@ -222,6 +226,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
                           isSelected: false, // Not a persistent tool
                           onPressed: () {
                             _isNewCanvas = false; // Mark as edited when adding media
+                            _isSaved = false; // Mark as unsaved when adding media
                             Provider.of<DrawingProvider>(context, listen: false)
                               .addVideoFromGallery(context, _transformationController);
                           },
@@ -332,8 +337,8 @@ class _DrawingBoardState extends State<DrawingBoard> {
   void _navigateToCalendar() async {
     // If there are changes, ask to save first
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty) {
-      // Prompt to save
+    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty && !_isSaved) {
+      // Prompt to save only if not saved yet
       final shouldSave = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -373,7 +378,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
     
     // If there are changes in the current canvas, ask to save first
-    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty) {
+    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty && !_isSaved) {
       // Prompt to save
       final shouldSave = await showDialog<bool>(
         context: context,
@@ -409,6 +414,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
     // Mark as new canvas
     setState(() {
       _isNewCanvas = true;
+      _isSaved = false; // Reset saved flag
     });
   }
 
@@ -454,6 +460,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
                 // No longer a new canvas
                 setState(() {
                   _isNewCanvas = false;
+                  _isSaved = true; // Mark as saved
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('New canvas "$title" saved')),
@@ -482,19 +489,40 @@ class _DrawingBoardState extends State<DrawingBoard> {
       return;
     }
 
-    // Always save as a new entry to allow multiple canvases per day
-    final defaultTitle = calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
-    final entry = await calendarProvider.saveCurrentDrawing(drawingProvider, title: defaultTitle);
+    CalendarEntry? entry;
+    final currentEntryId = calendarProvider.selectedEntryId;
+    
+    // If we have a current entry selected and it's not a new canvas, update it
+    if (!_isNewCanvas && currentEntryId != null) {
+      // Update existing entry
+      await calendarProvider.updateEntry(
+        currentEntryId, 
+        drawingProvider,
+        title: calendarProvider.currentEntry?.title ?? 'Canvas'
+      );
+      entry = calendarProvider.currentEntry;
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Canvas "${entry?.title}" updated')),
+      );
+    } else {
+      // Create new entry with default title
+      final defaultTitle = calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
+      entry = await calendarProvider.saveCurrentDrawing(drawingProvider, title: defaultTitle);
+      
+      if (entry != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('New canvas "${entry.title}" saved')),
+        );
+      }
+    }
     
     if (entry != null) {
       // No longer a new canvas
       setState(() {
         _isNewCanvas = false;
+        _isSaved = true; // Mark as saved
       });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('New canvas "${entry.title}" saved')),
-      );
     }
   }
 

@@ -79,13 +79,24 @@ class CalendarProvider extends ChangeNotifier {
     notifyListeners();
   }
   
-  // Save current drawing as a new entry - always creates a new canvas
-  Future<CalendarEntry?> saveCurrentDrawing(DrawingProvider drawingProvider, {String title = ''}) async {
+  // Save current drawing - now with option to update existing or create new
+  Future<CalendarEntry?> saveCurrentDrawing(DrawingProvider drawingProvider, {String title = '', bool updateExisting = false}) async {
     if (drawingProvider.elements.isEmpty) {
       print('Nothing to save - canvas is empty');
       return null;
     }
     
+    // Check if we should update an existing entry
+    if (updateExisting && _selectedEntryId != null) {
+      // Update the existing entry
+      final index = _entries.indexWhere((entry) => entry.id == _selectedEntryId);
+      if (index >= 0) {
+        await updateEntry(_selectedEntryId!, drawingProvider, title: title);
+        return _entries[index];
+      }
+    }
+    
+    // Otherwise, create a new entry
     // Generate a thumbnail from the current drawing
     final thumbnailPath = await _generateThumbnail(drawingProvider.elements);
     
