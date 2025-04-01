@@ -20,75 +20,131 @@ class CalendarProvider extends ChangeNotifier {
   // Calendar data
   List<CalendarEntry> _entries = [];
   DateTime _selectedDate = DateTime.now();
+  String? _selectedEntryId; // Track the currently selected entry ID
   
   // Getters
   List<CalendarEntry> get entries => _entries;
   DateTime get selectedDate => _selectedDate;
+  String? get selectedEntryId => _selectedEntryId;
   
   // Constructor - load entries when provider is created
   CalendarProvider() {
     loadEntriesFromDisk();
   }
   
-  // Find entry for a specific date
-  CalendarEntry? getEntryForDate(DateTime date) {
+  // Get all entries for a specific date
+  List<CalendarEntry> getEntriesForDate(DateTime date) {
+    // Convert entries to match just date (ignore time)
+    final normalizedDate = DateTime(date.year, date.month, date.day);
+    return _entries.where((entry) => 
+      entry.date.year == normalizedDate.year && 
+      entry.date.month == normalizedDate.month && 
+      entry.date.day == normalizedDate.day
+    ).toList();
+  }
+  
+  // Get a specific entry by ID
+  CalendarEntry? getEntryById(String id) {
     try {
-      return _entries.firstWhere(
-        (entry) => entry.matchesDate(date),
-      );
+      return _entries.firstWhere((entry) => entry.id == id);
     } catch (e) {
       return null;
     }
   }
   
-  // Get entry for currently selected date
-  CalendarEntry? get currentEntry => getEntryForDate(_selectedDate);
+  // Get the currently selected entry
+  CalendarEntry? get currentEntry => _selectedEntryId != null 
+      ? getEntryById(_selectedEntryId!)
+      : getEntriesForDate(_selectedDate).isNotEmpty 
+          ? getEntriesForDate(_selectedDate).first 
+          : null;
   
   // Select a date
   void selectDate(DateTime date) {
-    _selectedDate = date;
+    // Normalize the date to remove time component
+    _selectedDate = DateTime(date.year, date.month, date.day);
+    // Reset selected entry ID when changing date
+    _selectedEntryId = null;
+    notifyListeners();
+  }
+
+  // Select a specific entry
+  void selectEntry(String id) {
+    _selectedEntryId = id;
+    final entry = getEntryById(id);
+    if (entry != null) {
+      // Keep same date but reset the entry selection
+      _selectedDate = DateTime(entry.date.year, entry.date.month, entry.date.day);
+    }
     notifyListeners();
   }
   
-  // Save current drawing as today's entry
-  Future<void> saveCurrentDrawing(DrawingProvider drawingProvider) async {
+  // Save current drawing as a new entry - always creates a new canvas
+  Future<CalendarEntry?> saveCurrentDrawing(DrawingProvider drawingProvider, {String title = ''}) async {
+    if (drawingProvider.elements.isEmpty) {
+      print('Nothing to save - canvas is empty');
+      return null;
+    }
+    
     // Generate a thumbnail from the current drawing
     final thumbnailPath = await _generateThumbnail(drawingProvider.elements);
     
     // Clone all elements to ensure we store a snapshot
     final elementsCopy = drawingProvider.elements.map((e) => e.clone()).toList();
     
-    // Check if there's already an entry for today
-    final existingEntryIndex = _entries.indexWhere(
-      (entry) => entry.matchesDate(_selectedDate)
+    // Generate a unique ID using UUID
+    final uniqueId = const Uuid().v4();
+    
+    // Create new entry with unique ID
+    final newEntry = CalendarEntry(
+      date: _selectedDate,
+      id: uniqueId,
+      title: title,
+      elements: elementsCopy,
+      thumbnailPath: thumbnailPath,
+      createdAt: DateTime.now(),
     );
     
-    if (existingEntryIndex >= 0) {
-      // Update existing entry
-      _entries[existingEntryIndex] = _entries[existingEntryIndex].copyWith(
-        elements: elementsCopy,
-        thumbnailPath: thumbnailPath,
-      );
-    } else {
-      // Create new entry
-      _entries.add(
-        CalendarEntry(
-          date: _selectedDate,
-          elements: elementsCopy,
-          thumbnailPath: thumbnailPath,
-        )
-      );
-    }
+    // Add to entries list
+    _entries.add(newEntry);
     
     // Save entries to persistent storage
+    await _saveEntriesToDisk();
+    
+    // Select this new entry
+    _selectedEntryId = newEntry.id;
+    
+    notifyListeners();
+    return newEntry;
+  }
+
+  // Update an existing entry
+  Future<void> updateEntry(String entryId, DrawingProvider drawingProvider, {String? title}) async {
+    final index = _entries.indexWhere((entry) => entry.id == entryId);
+    if (index < 0) return;
+    
+    // Generate a thumbnail from the current drawing
+    final thumbnailPath = await _generateThumbnail(drawingProvider.elements);
+    
+    // Clone all elements to ensure we store a snapshot
+    final elementsCopy = drawingProvider.elements.map((e) => e.clone()).toList();
+    
+    // Update the entry
+    _entries[index] = _entries[index].copyWith(
+      elements: elementsCopy,
+      thumbnailPath: thumbnailPath,
+      title: title ?? _entries[index].title,
+    );
+    
+    // Save to disk
     await _saveEntriesToDisk();
     
     notifyListeners();
   }
   
   // Load a saved drawing into the DrawingProvider
-  void loadDrawing(DateTime date, DrawingProvider drawingProvider) {
-    final entry = getEntryForDate(date);
+  void loadDrawing(String entryId, DrawingProvider drawingProvider) {
+    final entry = getEntryById(entryId);
     
     if (entry != null) {
       // Save to undo stack first
@@ -100,8 +156,11 @@ class CalendarProvider extends ChangeNotifier {
       // Set the elements in the drawing provider
       drawingProvider.loadElements(loadedElements);
       
-      // Update selected date
-      selectDate(date);
+      // Update selected date and entry
+      selectDate(entry.date);
+      _selectedEntryId = entry.id;
+      
+      notifyListeners();
     }
   }
   
@@ -189,10 +248,10 @@ class CalendarProvider extends ChangeNotifier {
     }
   }
   
-  // Clear the entry for a specific date
-  Future<void> clearEntry(DateTime date) async {
+  // Delete a specific entry by ID
+  Future<void> deleteEntry(String entryId) async {
     // First get the entry to clean up resources
-    final entry = getEntryForDate(date);
+    final entry = getEntryById(entryId);
     if (entry != null) {
       // Delete thumbnail file if it exists
       if (entry.thumbnailPath != null) {
@@ -214,12 +273,26 @@ class CalendarProvider extends ChangeNotifier {
       }
       
       // Remove entry
-      _entries.removeWhere((entry) => entry.matchesDate(date));
+      _entries.removeWhere((e) => e.id == entryId);
+      
+      // If this was the selected entry, clear selection
+      if (_selectedEntryId == entryId) {
+        _selectedEntryId = null;
+      }
       
       // Save entries to disk
       await _saveEntriesToDisk();
       
       notifyListeners();
+    }
+  }
+  
+  // Clear all entries for a specific date
+  Future<void> clearEntriesForDate(DateTime date) async {
+    final entriesToDelete = getEntriesForDate(date);
+    
+    for (final entry in entriesToDelete) {
+      await deleteEntry(entry.id);
     }
   }
   
@@ -286,6 +359,10 @@ class CalendarProvider extends ChangeNotifier {
     DateTime date = DateTime.parse(entryMap['date']);
     String id = entryMap['id'];
     String? thumbnailPath = entryMap['thumbnailPath'];
+    String title = entryMap['title'] ?? '';
+    DateTime createdAt = entryMap.containsKey('createdAt') 
+        ? DateTime.parse(entryMap['createdAt']) 
+        : DateTime.now();
     
     // Process elements
     List<DrawingElement> elements = [];
@@ -334,8 +411,10 @@ class CalendarProvider extends ChangeNotifier {
     return CalendarEntry(
       date: date,
       id: id,
+      title: title,
       elements: elements,
       thumbnailPath: thumbnailPath,
+      createdAt: createdAt,
     );
   }
   
@@ -449,12 +528,38 @@ class CalendarProvider extends ChangeNotifier {
 
   // Get a list of dates that have entries in a given month range
   List<DateTime> getDatesWithEntries(DateTime start, DateTime end) {
-    return _entries
-        .where((entry) => 
-            entry.date.isAfter(start.subtract(const Duration(days: 1))) &&
-            entry.date.isBefore(end.add(const Duration(days: 1))))
-        .map((entry) => entry.date)
-        .toList();
+    // Get unique dates that have entries
+    final Set<String> uniqueDates = {};
+    final List<DateTime> result = [];
+    
+    for (var entry in _entries) {
+      if (entry.date.isAfter(start.subtract(const Duration(days: 1))) &&
+          entry.date.isBefore(end.add(const Duration(days: 1)))) {
+            
+        // Create a date string in the format YYYY-MM-DD for uniqueness check
+        final dateString = '${entry.date.year}-${entry.date.month}-${entry.date.day}';
+        if (!uniqueDates.contains(dateString)) {
+          uniqueDates.add(dateString);
+          result.add(entry.date);
+        }
+      }
+    }
+    
+    return result;
+  }
+  
+  // Get the count of entries for a specific date
+  int getEntryCountForDate(DateTime date) {
+    return getEntriesForDate(date).length;
+  }
+  
+  // Generate a default title for a canvas if none is provided
+  String generateDefaultTitle(DateTime date) {
+    final count = getEntryCountForDate(date) + 1;
+    if (count > 1) {
+      return 'Canvas $count';
+    }
+    return 'Canvas';
   }
   
   // Clean up resources

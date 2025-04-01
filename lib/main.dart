@@ -3,17 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'providers/drawing_provider.dart';
-import 'providers/calendar_provider.dart'; // Added import
+import 'providers/calendar_provider.dart';
 import 'widgets/drawing_canvas.dart';
-import 'screens/calendar_screen.dart'; // Added import
-import 'models/element.dart'; // Base element type
+import 'screens/calendar_screen.dart';
+import 'models/element.dart';
 
 void main() {
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => DrawingProvider()),
-        ChangeNotifierProvider(create: (_) => CalendarProvider()), // Added provider
+        ChangeNotifierProvider(create: (_) => CalendarProvider()),
       ],
       child: const MyApp(),
     ),
@@ -30,11 +30,10 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
-        // Define visual density for consistent spacing
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: const DrawingBoard(),
-      debugShowCheckedModeBanner: false, // Hide debug banner
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -49,35 +48,37 @@ class DrawingBoard extends StatefulWidget {
 class _DrawingBoardState extends State<DrawingBoard> {
   int _pointerCount = 0;
   late TransformationController _transformationController;
+  bool _isNewCanvas = true;
 
   @override
   void initState() {
     super.initState();
     _transformationController = TransformationController();
-    // Optional: Add listener to transformationController to update other UI if needed
-    // _transformationController.addListener(_onTransformUpdate);
   }
-
-  // void _onTransformUpdate() {
-  //   // Example: Update scale display somewhere
-  //   // setState(() { _currentScale = _transformationController.value.getMaxScaleOnAxis(); });
-  // }
 
   @override
   void dispose() {
-    // _transformationController.removeListener(_onTransformUpdate);
     _transformationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Access provider once here if needed for multiple actions, but prefer Consumer/Selector
-    // final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Flutter Drawing App'),
+        title: Consumer<CalendarProvider>(
+          builder: (context, provider, child) {
+            final entry = provider.currentEntry;
+            if (entry != null) {
+              return Text(
+                entry.title.isNotEmpty
+                    ? entry.title
+                    : 'Canvas - ${entry.date.month}/${entry.date.day}'
+              );
+            }
+            return const Text('New Canvas');
+          },
+        ),
         actions: [
           // Calendar View Button
           IconButton(
@@ -91,12 +92,12 @@ class _DrawingBoardState extends State<DrawingBoard> {
             onPressed: () => _saveCurrentCanvas(),
             tooltip: 'Save Canvas',
           ),
-          // Select Tool (Moved to Tool Palette)
-          // IconButton(
-          //   icon: const Icon(Icons.pan_tool_alt_outlined),
-          //   onPressed: () => Provider.of<DrawingProvider>(context, listen: false).setTool(ElementType.select),
-          //   tooltip: 'Select / Move',
-          // ),
+          // Add button to name/rename canvas
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            onPressed: () => _showNameCanvasDialog(),
+            tooltip: 'Name Canvas',
+          ),
           IconButton(
             icon: const Icon(Icons.undo),
             onPressed: () => Provider.of<DrawingProvider>(context, listen: false).undo(),
@@ -112,17 +113,6 @@ class _DrawingBoardState extends State<DrawingBoard> {
             onPressed: () => Provider.of<DrawingProvider>(context, listen: false).deleteSelected(),
             tooltip: 'Delete Selected',
           ),
-          // Grouping not implemented yet
-          // IconButton(
-          //   icon: const Icon(Icons.group_work),
-          //   onPressed: () => Provider.of<DrawingProvider>(context, listen: false).groupSelected(),
-          //   tooltip: 'Group Selected',
-          // ),
-          // IconButton(
-          //   icon: const Icon(Icons.call_split),
-          //   onPressed: () => Provider.of<DrawingProvider>(context, listen: false).ungroupSelected(),
-          //   tooltip: 'Ungroup Selected',
-          // ),
         ],
       ),
       body: Stack(
@@ -130,13 +120,23 @@ class _DrawingBoardState extends State<DrawingBoard> {
           // Listener to track pointer count for enabling/disabling InteractiveViewer pan/zoom
           Listener(
             onPointerDown: (PointerDownEvent event) {
-              setState(() { _pointerCount++; });
+              setState(() {
+                _pointerCount++;
+              });
+              // Mark as edited once user interacts with canvas
+              if (_isNewCanvas) {
+                _isNewCanvas = false;
+              }
             },
             onPointerUp: (PointerUpEvent event) {
-              setState(() { _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0; });
+              setState(() {
+                _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
+              });
             },
             onPointerCancel: (PointerCancelEvent event) {
-              setState(() { _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0; });
+              setState(() {
+                _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
+              });
             },
             // Make this listener transparent to interactions intended for the canvas
             behavior: HitTestBehavior.translucent,
@@ -170,7 +170,8 @@ class _DrawingBoardState extends State<DrawingBoard> {
           Positioned(
             left: 16,
             top: 16,
-            child: Card( // Wrap palette in a Card for better visuals
+            child: Card(
+              // Wrap palette in a Card for better visuals
               elevation: 4.0,
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
@@ -209,13 +210,21 @@ class _DrawingBoardState extends State<DrawingBoard> {
                         ToolButton(
                           icon: Icons.image,
                           isSelected: false, // Not a persistent tool
-                          onPressed: () => Provider.of<DrawingProvider>(context, listen: false).addImageFromGallery(context, _transformationController), // Pass controller
+                          onPressed: () { 
+                            _isNewCanvas = false; // Mark as edited when adding media
+                            Provider.of<DrawingProvider>(context, listen: false)
+                              .addImageFromGallery(context, _transformationController); 
+                          },
                           tooltip: 'Add Image',
                         ),
                         ToolButton(
                           icon: Icons.videocam,
                           isSelected: false, // Not a persistent tool
-                          onPressed: () => Provider.of<DrawingProvider>(context, listen: false).addVideoFromGallery(context, _transformationController), // Pass controller
+                          onPressed: () {
+                            _isNewCanvas = false; // Mark as edited when adding media
+                            Provider.of<DrawingProvider>(context, listen: false)
+                              .addVideoFromGallery(context, _transformationController);
+                          },
                           tooltip: 'Add Video',
                         ),
 
@@ -250,52 +259,243 @@ class _DrawingBoardState extends State<DrawingBoard> {
             ),
           ),
 
-          // Optional: Debug info display
+          // Status indicator - show if this is a new or edited canvas
+          Positioned(
+            top: 10,
+            right: 10,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _isNewCanvas ? Icons.fiber_new : Icons.edit,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _isNewCanvas ? 'New Canvas' : 'Edited',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Debug info display
           Positioned(
             bottom: 10,
             right: 10,
             child: Container(
               padding: const EdgeInsets.all(8),
               color: Colors.black.withOpacity(0.6),
-              child: Text(
-                'Pointers: $_pointerCount\nInteraction: ${_pointerCount >= 2}',
-                style: const TextStyle(color: Colors.white, fontSize: 10),
+              child: Consumer<CalendarProvider>(
+                builder: (context, calendarProvider, child) {
+                  final currentEntry = calendarProvider.currentEntry;
+                  final canvasInfo = currentEntry != null
+                      ? 'Canvas: ${currentEntry.title.isNotEmpty ? currentEntry.title : 'Untitled'}'
+                      : 'New Canvas';
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        canvasInfo,
+                        style: const TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                      Text(
+                        'Pointers: $_pointerCount\nInteraction: ${_pointerCount >= 2}',
+                        style: const TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.add),
+        onPressed: () => _createNewCanvas(),
+        tooltip: 'Create New Canvas',
+      ),
+    );
+  }
+
+  // Navigate to calendar screen
+  void _navigateToCalendar() async {
+    // If there are changes, ask to save first
+    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty) {
+      // Prompt to save
+      final shouldSave = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Save Changes?'),
+          content: const Text('Do you want to save your changes before viewing the calendar?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('NO'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('YES'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldSave == true) {
+        await _saveCurrentCanvas();
+      }
+    }
+    
+    // Navigate to calendar
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => const CalendarScreen(),
+        ),
+      );
+    }
+  }
+
+  // Create a new blank canvas
+  void _createNewCanvas() async {
+    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+    final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
+    
+    // If there are changes in the current canvas, ask to save first
+    if (!_isNewCanvas && drawingProvider.elements.isNotEmpty) {
+      // Prompt to save
+      final shouldSave = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Save Current Canvas?'),
+          content: const Text('Do you want to save your current canvas before creating a new one?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('NO'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('YES'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldSave == true) {
+        await _saveCurrentCanvas();
+      }
+    }
+    
+    // Clear current drawing and reset tools
+    drawingProvider.elements = [];
+    drawingProvider.currentElement = null;
+    drawingProvider.setTool(ElementType.select);
+    
+    // Reset selection in calendar provider to today but don't select any specific entry
+    calendarProvider.selectDate(DateTime.now());
+    
+    // Mark as new canvas
+    setState(() {
+      _isNewCanvas = true;
+    });
+  }
+
+  // Show dialog to name or rename the current canvas
+  void _showNameCanvasDialog() {
+    final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
+    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+
+    // Get a default title for the new canvas
+    String defaultTitle = calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
+    
+    final titleController = TextEditingController(text: defaultTitle);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Name Canvas'),
+        content: TextField(
+          controller: titleController,
+          decoration: const InputDecoration(
+            labelText: 'Canvas Title',
+            hintText: 'Enter a title for this canvas',
+          ),
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final title = titleController.text;
+
+              // Always save as a new entry
+              final entry = await calendarProvider.saveCurrentDrawing(
+                drawingProvider,
+                title: title,
+              );
+              
+              if (entry != null) {
+                // No longer a new canvas
+                setState(() {
+                  _isNewCanvas = false;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('New canvas "$title" saved')),
+                );
+              }
+
+              if (mounted) Navigator.of(context).pop();
+            },
+            child: const Text('SAVE'),
           ),
         ],
       ),
     );
   }
 
-  // Navigate to calendar screen
-  void _navigateToCalendar() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const CalendarScreen(),
-      ),
-    );
-  }
-
   // Save current canvas to calendar
-  void _saveCurrentCanvas() async {
+  Future<void> _saveCurrentCanvas() async {
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
-    
+
     // Check if there's anything to save
     if (drawingProvider.elements.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nothing to save - canvas is empty'))
+        const SnackBar(content: Text('Nothing to save - canvas is empty')),
       );
       return;
     }
+
+    // Always save as a new entry to allow multiple canvases per day
+    final defaultTitle = calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
+    final entry = await calendarProvider.saveCurrentDrawing(drawingProvider, title: defaultTitle);
     
-    // Save the current drawing to the current date
-    await calendarProvider.saveCurrentDrawing(drawingProvider);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Canvas saved to calendar'))
-    );
+    if (entry != null) {
+      // No longer a new canvas
+      setState(() {
+        _isNewCanvas = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('New canvas "${entry.title}" saved')),
+      );
+    }
   }
 
   // Helper method for Color Picker Dialog

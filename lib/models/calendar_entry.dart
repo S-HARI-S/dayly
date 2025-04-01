@@ -9,15 +9,21 @@ import 'video_element.dart';
 class CalendarEntry {
   final DateTime date;
   final String id;
+  final String title; // Add a title for each canvas
   final List<DrawingElement> elements;
   final String? thumbnailPath; // Path to stored thumbnail image
+  final DateTime createdAt; // When this canvas was created
 
   CalendarEntry({
     required this.date,
     String? id,
+    this.title = '', // Default empty title
     required this.elements,
     this.thumbnailPath,
-  }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    DateTime? createdAt,
+  }) : 
+    id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+    createdAt = createdAt ?? DateTime.now();
 
   // Check if this entry matches a specific date (ignoring time)
   bool matchesDate(DateTime other) {
@@ -30,14 +36,18 @@ class CalendarEntry {
   CalendarEntry copyWith({
     DateTime? date,
     String? id,
+    String? title,
     List<DrawingElement>? elements,
     String? thumbnailPath,
+    DateTime? createdAt,
   }) {
     return CalendarEntry(
       date: date ?? this.date,
       id: id ?? this.id,
+      title: title ?? this.title,
       elements: elements ?? this.elements,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -46,7 +56,9 @@ class CalendarEntry {
     return {
       'date': date.toIso8601String(),
       'id': id,
+      'title': title,
       'thumbnailPath': thumbnailPath,
+      'createdAt': createdAt.toIso8601String(),
       'elements': elements.map((element) {
         final Map<String, dynamic> elementMap = element.toMap();
         // Add type information for proper deserialization
@@ -94,8 +106,10 @@ class CalendarEntry {
     return CalendarEntry(
       date: DateTime.parse(map['date']),
       id: map['id'],
+      title: map['title'] ?? '',
       elements: parsedElements,
       thumbnailPath: map['thumbnailPath'],
+      createdAt: map.containsKey('createdAt') ? DateTime.parse(map['createdAt']) : null,
     );
   }
 

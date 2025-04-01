@@ -104,15 +104,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         markedDate.year == date.year && 
                         markedDate.month == date.month && 
                         markedDate.day == date.day)) {
+                      // Get the number of entries for this date
+                      final entryCount = calendarProvider.getEntryCountForDate(date);
+                      
                       return Positioned(
                         right: 1,
                         bottom: 1,
                         child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: Colors.blue,
+                            border: Border.all(color: Colors.white, width: 1.0),
+                          ),
+                          child: Center(
+                            child: Text(
+                              entryCount.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ),
                       );
@@ -148,9 +162,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   Widget _buildEntriesList(BuildContext context, CalendarProvider calendarProvider) {
-    final selectedEntry = calendarProvider.getEntryForDate(_selectedDay ?? DateTime.now());
+    if (_selectedDay == null) {
+      return const Center(child: Text('Please select a date'));
+    }
     
-    if (selectedEntry == null) {
+    final selectedDate = _selectedDay!;
+    final entries = calendarProvider.getEntriesForDate(selectedDate);
+    
+    if (entries.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -173,68 +192,140 @@ class _CalendarScreenState extends State<CalendarScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Text(
-            DateFormat.yMMMMd().format(selectedEntry.date),
+            '${DateFormat.yMMMMd().format(selectedDate)} - ${entries.length} ${entries.length == 1 ? 'Canvas' : 'Canvases'}',
             style: Theme.of(context).textTheme.titleLarge,
           ),
         ),
         const SizedBox(height: 8),
-        if (selectedEntry.thumbnailPath != null)
-          Expanded(
-            child: Center(
-              child: GestureDetector(
-                onTap: () => _openCanvas(context, selectedEntry),
-                child: Card(
-                  elevation: 4,
-                  margin: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: Image.file(
-                          File(selectedEntry.thumbnailPath!),
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton.icon(
-                              icon: const Icon(Icons.edit, size: 16),
-                              label: const Text('Open'),
-                              onPressed: () => _openCanvas(context, selectedEntry),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              icon: const Icon(Icons.delete, size: 16),
-                              label: const Text('Delete'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.red,
-                              ),
-                              onPressed: () => _confirmDelete(context, selectedEntry),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+        Expanded(
+          child: ListView.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return _buildCanvasCard(context, entry);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildCanvasCard(BuildContext context, CalendarEntry entry) {
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Title bar with canvas name and time
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    entry.title.isEmpty 
+                        ? 'Canvas ${DateFormat('h:mm a').format(entry.createdAt)}' 
+                        : entry.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Text(
+                  DateFormat('h:mm a').format(entry.createdAt),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey[600]
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Canvas thumbnail
+          if (entry.thumbnailPath != null)
+            Container(
+              height: 150,
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: GestureDetector(
+                  onTap: () => _openCanvas(context, entry),
+                  child: Image.file(
+                    File(entry.thumbnailPath!),
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),
             ),
-          )
-        else
-          Expanded(
-            child: Center(
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.edit),
-                label: const Text('Open Canvas'),
-                onPressed: () => _openCanvas(context, selectedEntry),
+            
+          // Action buttons
+          ButtonBar(
+            alignment: MainAxisAlignment.end,
+            children: [
+              // Edit title button
+              IconButton(
+                icon: const Icon(Icons.edit_note, size: 20),
+                onPressed: () => _showEditTitleDialog(context, entry),
+                tooltip: 'Edit Title',
               ),
-            ),
+              // Open button
+              TextButton.icon(
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('Open'),
+                onPressed: () => _openCanvas(context, entry),
+              ),
+              // Delete button
+              TextButton.icon(
+                icon: const Icon(Icons.delete, size: 16),
+                label: const Text('Delete'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red,
+                ),
+                onPressed: () => _confirmDelete(context, entry),
+              ),
+            ],
           ),
-      ],
+        ],
+      ),
+    );
+  }
+
+  void _showEditTitleDialog(BuildContext context, CalendarEntry entry) {
+    final titleController = TextEditingController(text: entry.title);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Canvas Title'),
+        content: TextField(
+          controller: titleController,
+          decoration: const InputDecoration(
+            labelText: 'Canvas Title',
+            hintText: 'Enter a title for this canvas',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () {
+              final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
+              final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+              
+              // Load the entry and update its title
+              calendarProvider.loadDrawing(entry.id, drawingProvider);
+              calendarProvider.updateEntry(entry.id, drawingProvider, title: titleController.text);
+              
+              Navigator.of(context).pop();
+            },
+            child: const Text('SAVE'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -243,9 +334,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
     
-    // Select today's date
-    final today = DateTime.now();
-    calendarProvider.selectDate(today);
+    // If a date is selected, use that, otherwise use today
+    final selectedDate = _selectedDay ?? DateTime.now();
+    
+    // Just select the date without selecting a specific entry
+    // This will prepare for creating a new canvas
+    calendarProvider.selectDate(selectedDate);
     
     // Clear current drawing and reset tools
     drawingProvider.elements = [];
@@ -262,7 +356,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
     
     // Load this entry's elements into drawing provider
-    calendarProvider.loadDrawing(entry.date, drawingProvider);
+    calendarProvider.loadDrawing(entry.id, drawingProvider);
     
     // Navigate back to drawing screen
     Navigator.of(context).pop();
@@ -272,8 +366,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Entry'),
-        content: Text('Are you sure you want to delete the entry for ${DateFormat.yMMMMd().format(entry.date)}?'),
+        title: const Text('Delete Canvas'),
+        content: Text(
+          entry.title.isEmpty
+            ? 'Are you sure you want to delete this canvas?'
+            : 'Are you sure you want to delete "${entry.title}"?'
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -282,7 +380,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           TextButton(
             onPressed: () {
               final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
-              calendarProvider.clearEntry(entry.date);
+              calendarProvider.deleteEntry(entry.id);
               Navigator.of(context).pop();
             },
             child: const Text('DELETE', style: TextStyle(color: Colors.red)),
