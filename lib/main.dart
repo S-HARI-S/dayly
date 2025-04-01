@@ -422,16 +422,27 @@ class _DrawingBoardState extends State<DrawingBoard> {
   void _showNameCanvasDialog() {
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-
-    // Get a default title for the new canvas
-    String defaultTitle = calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
     
-    final titleController = TextEditingController(text: defaultTitle);
+    // Check if there's a selected entry ID, which means we're working with an existing canvas
+    final currentEntry = calendarProvider.currentEntry;
+    final currentEntryId = calendarProvider.selectedEntryId;
+    
+    // It's a rename operation if:
+    // 1. There's a selected entry ID (we're working with an existing canvas)
+    // 2. The current entry exists
+    final isRename = currentEntryId != null && currentEntry != null;
+    
+    // Get existing title for rename or generate a default title for a new canvas
+    String initialTitle = isRename 
+        ? currentEntry.title
+        : calendarProvider.generateDefaultTitle(calendarProvider.selectedDate);
+    
+    final titleController = TextEditingController(text: initialTitle);
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Name Canvas'),
+        title: Text(isRename ? 'Rename Canvas' : 'Name Canvas'),
         content: TextField(
           controller: titleController,
           decoration: const InputDecoration(
@@ -450,21 +461,37 @@ class _DrawingBoardState extends State<DrawingBoard> {
             onPressed: () async {
               final title = titleController.text;
 
-              // Always save as a new entry
-              final entry = await calendarProvider.saveCurrentDrawing(
-                drawingProvider,
-                title: title,
-              );
-              
-              if (entry != null) {
-                // No longer a new canvas
+              if (isRename && currentEntry != null) {
+                // Update existing entry with new title
+                await calendarProvider.updateEntry(
+                  currentEntry.id, 
+                  drawingProvider,
+                  title: title
+                );
+                
                 setState(() {
-                  _isNewCanvas = false;
                   _isSaved = true; // Mark as saved
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('New canvas "$title" saved')),
+                  SnackBar(content: Text('Canvas renamed to "$title"')),
                 );
+              } else {
+                // Create new entry
+                final entry = await calendarProvider.saveCurrentDrawing(
+                  drawingProvider,
+                  title: title,
+                );
+                
+                if (entry != null) {
+                  // No longer a new canvas
+                  setState(() {
+                    _isNewCanvas = false;
+                    _isSaved = true; // Mark as saved
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('New canvas "$title" saved')),
+                  );
+                }
               }
 
               if (mounted) Navigator.of(context).pop();
