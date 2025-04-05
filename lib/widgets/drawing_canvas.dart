@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4, MatrixUtils;
 import 'package:collection/collection.dart'; // FIX: Import for firstWhereOrNull etc.
+import 'package:video_player/video_player.dart';
 
 import '../providers/drawing_provider.dart'; // No extension needed here now
 import '../models/element.dart';
@@ -76,126 +77,164 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         final currentDrawingElement = data.current;
         final transform = widget.transformationController.value;
 
-        return Listener(
-          onPointerDown: (PointerDownEvent event) {
-            if (!mounted) return;
-            // Use event.localPosition - assuming Listener is correctly placed within transformed child
-            final Offset localPosition = event.localPosition;
+        // Get video elements from the list of elements
+        final List<VideoElement> videoElements = currentElements
+            .whereType<VideoElement>()
+            .toList();
 
-            _cancelMoveTimer();
-            setState(() { _activePointers++; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
-            _potentialInteractionStartPosition = localPosition; _lastInteractionPosition = localPosition;
-            if (_activePointers > 1 || widget.isInteracting) return;
-            HapticFeedback.lightImpact();
-            final currentTool = drawingProvider.currentTool;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // The main canvas with all drawing elements
+            Listener(
+              onPointerDown: (PointerDownEvent event) {
+                if (!mounted) return;
+                // Use event.localPosition - assuming Listener is correctly placed within transformed child
+                final Offset localPosition = event.localPosition;
 
-            if (currentTool == ElementType.select) {
-              bool actionTaken = false;
-              // 1. Hit Handle?
-              if (selectedIds.length == 1) {
-                 // FIX: Use firstWhereOrNull from collection package
-                 final selectedElement = currentElements.firstWhereOrNull((el) => el.id == selectedIds.first);
-                 if (selectedElement != null) {
-                   // FIX: Correct scale calculation
-                   final double scale = transform.getMaxScaleOnAxis();
-                   final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
-                   _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
-                   if (_draggedHandle != null) {
-                     setState(() { _isResizingElement = true; _elementBeingInteractedWith = selectedElement; });
-                     drawingProvider.startPotentialResize(); HapticFeedback.mediumImpact();
-                     print("Handle HIT: $_draggedHandle on ${selectedElement.id}"); actionTaken = true;
-                   }
-                 }
-              }
-              // 2. Hit Element Body?
-              if (!actionTaken) {
-                 // FIX: Use lastWhereOrNull from collection package
-                 DrawingElement? hitElement = currentElements.lastWhereOrNull((el) => el.containsPoint(localPosition));
-                 if (hitElement != null) {
-                    if (!(selectedIds.length == 1 && selectedIds.first == hitElement.id)) { drawingProvider.selectElementAt(localPosition); }
-                    setState(() { _elementBeingInteractedWith = hitElement; });
-                    drawingProvider.startPotentialMove(); actionTaken = true;
-                    print("Element HIT: ${hitElement.id}. Starting move timer.");
-                    _moveDelayTimer = Timer(longPressDuration, () {
-                      // FIX: Correct boolean check for null element
-                      if (!mounted || _elementBeingInteractedWith == null) return; // Check == null
-                      print("** Move Timer Fired! Enabling Drag for ${_elementBeingInteractedWith?.id} **");
-                      setState(() { _isMovingElement = true; }); HapticFeedback.mediumImpact();
-                    });
-                 }
-              }
-              // 3. Tapped Empty Space?
-              if (!actionTaken) { print("Tap empty space - clearing selection."); drawingProvider.clearSelection(); }
-            }
-            else if (currentTool == ElementType.pen) { drawingProvider.startDrawing(localPosition); } // Pass localPosition
-          },
+                _cancelMoveTimer();
+                setState(() { _activePointers++; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
+                _potentialInteractionStartPosition = localPosition; _lastInteractionPosition = localPosition;
+                if (_activePointers > 1 || widget.isInteracting) return;
+                HapticFeedback.lightImpact();
+                final currentTool = drawingProvider.currentTool;
 
-          onPointerMove: (PointerMoveEvent event) {
-            if (!mounted || _activePointers != 1 || widget.isInteracting) return;
-            final Offset localPosition = event.localPosition; // Use localPosition
-            if (_lastInteractionPosition != null && (localPosition - _lastInteractionPosition!).distanceSquared < 0.1) return;
-            final delta = (_lastInteractionPosition != null) ? localPosition - _lastInteractionPosition! : Offset.zero;
-            final currentTool = drawingProvider.currentTool;
+                if (currentTool == ElementType.select) {
+                  bool actionTaken = false;
+                  // 1. Hit Handle?
+                  if (selectedIds.length == 1) {
+                     // FIX: Use firstWhereOrNull from collection package
+                     final selectedElement = currentElements.firstWhereOrNull((el) => el.id == selectedIds.first);
+                     if (selectedElement != null) {
+                       // FIX: Correct scale calculation
+                       final double scale = transform.getMaxScaleOnAxis();
+                       final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+                       _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
+                       if (_draggedHandle != null) {
+                         setState(() { _isResizingElement = true; _elementBeingInteractedWith = selectedElement; });
+                         drawingProvider.startPotentialResize(); HapticFeedback.mediumImpact();
+                         print("Handle HIT: $_draggedHandle on ${selectedElement.id}"); actionTaken = true;
+                       }
+                     }
+                  }
+                  // 2. Hit Element Body?
+                  if (!actionTaken) {
+                     // FIX: Use lastWhereOrNull from collection package
+                     DrawingElement? hitElement = currentElements.lastWhereOrNull((el) => el.containsPoint(localPosition));
+                     if (hitElement != null) {
+                        if (!(selectedIds.length == 1 && selectedIds.first == hitElement.id)) { drawingProvider.selectElementAt(localPosition); }
+                        setState(() { _elementBeingInteractedWith = hitElement; });
+                        drawingProvider.startPotentialMove(); actionTaken = true;
+                        print("Element HIT: ${hitElement.id}. Starting move timer.");
+                        _moveDelayTimer = Timer(longPressDuration, () {
+                          // FIX: Correct boolean check for null element
+                          if (!mounted || _elementBeingInteractedWith == null) return; // Check == null
+                          print("** Move Timer Fired! Enabling Drag for ${_elementBeingInteractedWith?.id} **");
+                          setState(() { _isMovingElement = true; }); HapticFeedback.mediumImpact();
+                        });
+                     }
+                  }
+                  // 3. Tapped Empty Space?
+                  if (!actionTaken) { print("Tap empty space - clearing selection."); drawingProvider.clearSelection(); }
+                }
+                else if (currentTool == ElementType.pen) { drawingProvider.startDrawing(localPosition); } // Pass localPosition
+              },
 
-            if (currentTool == ElementType.select) {
-              if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
-                 drawingProvider.resizeSelected( _elementBeingInteractedWith!.id, _draggedHandle!, delta, localPosition, _potentialInteractionStartPosition ?? localPosition);
-              } else if (_elementBeingInteractedWith != null) {
-                 if (_moveDelayTimer?.isActive ?? false) { if ((localPosition - _potentialInteractionStartPosition!).distance > moveCancelThreshold) { _cancelMoveTimer(); } }
-                 if (_isMovingElement) { drawingProvider.moveSelected(delta); }
-              }
-            } else if (currentTool == ElementType.pen) {
-              drawingProvider.updateDrawing(localPosition); // Pass localPosition
-            }
-            _lastInteractionPosition = localPosition;
-          },
+              onPointerMove: (PointerMoveEvent event) {
+                if (!mounted || _activePointers != 1 || widget.isInteracting) return;
+                final Offset localPosition = event.localPosition; // Use localPosition
+                if (_lastInteractionPosition != null && (localPosition - _lastInteractionPosition!).distanceSquared < 0.1) return;
+                final delta = (_lastInteractionPosition != null) ? localPosition - _lastInteractionPosition! : Offset.zero;
+                final currentTool = drawingProvider.currentTool;
 
-          onPointerUp: (PointerUpEvent event) {
-            if (!mounted) return;
-            _cancelMoveTimer();
-            final Offset upPosition = event.localPosition; // Use localPosition
-            final tapPosition = _potentialInteractionStartPosition ?? upPosition;
-            final currentTool = drawingProvider.currentTool;
-            bool wasMoving = _isMovingElement; bool wasResizing = _isResizingElement;
-            DrawingElement? interactedElement = _elementBeingInteractedWith;
+                if (currentTool == ElementType.select) {
+                  if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
+                     drawingProvider.resizeSelected( _elementBeingInteractedWith!.id, _draggedHandle!, delta, localPosition, _potentialInteractionStartPosition ?? localPosition);
+                  } else if (_elementBeingInteractedWith != null) {
+                     if (_moveDelayTimer?.isActive ?? false) { if ((localPosition - _potentialInteractionStartPosition!).distance > moveCancelThreshold) { _cancelMoveTimer(); } }
+                     if (_isMovingElement) { drawingProvider.moveSelected(delta); }
+                  }
+                } else if (currentTool == ElementType.pen) {
+                  drawingProvider.updateDrawing(localPosition); // Pass localPosition
+                }
+                _lastInteractionPosition = localPosition;
+              },
 
-            setState(() { _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
-            _lastInteractionPosition = null; _potentialInteractionStartPosition = null;
+              onPointerUp: (PointerUpEvent event) {
+                if (!mounted) return;
+                _cancelMoveTimer();
+                final Offset upPosition = event.localPosition; // Use localPosition
+                final tapPosition = _potentialInteractionStartPosition ?? upPosition;
+                final currentTool = drawingProvider.currentTool;
+                bool wasMoving = _isMovingElement; bool wasResizing = _isResizingElement;
+                DrawingElement? interactedElement = _elementBeingInteractedWith;
 
-            if (_activePointers == 0 && !widget.isInteracting) {
-              if (currentTool == ElementType.select) {
-                if (wasResizing) { print("End Resize"); drawingProvider.endPotentialResize(); }
-                else if (wasMoving) { print("End Move"); drawingProvider.endPotentialMove(); }
-                else if (interactedElement != null) { print("Tap on element: ${interactedElement.id}"); if (interactedElement is VideoElement) { drawingProvider.toggleVideoPlayback(interactedElement.id); } }
-                else { print("Tap on empty space."); }
-              }
-              else if (currentTool == ElementType.pen) { drawingProvider.endDrawing(); }
-              else if (currentTool == ElementType.text) { _showTextDialog(context, drawingProvider, tapPosition); } // Pass localPosition (start pos)
-            }
-          },
+                setState(() { _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
+                _lastInteractionPosition = null; _potentialInteractionStartPosition = null;
 
-          onPointerCancel: (PointerCancelEvent event) {
-             if (!mounted) return; print("Pointer Cancelled");
-             _cancelMoveTimer(); bool wasMoving = _isMovingElement; bool wasResizing = _isResizingElement;
-             if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) { drawingProvider.discardDrawing(); }
-             else if (wasResizing) { drawingProvider.endPotentialResize(); }
-             else if (wasMoving) { drawingProvider.endPotentialMove(); }
-             setState(() { _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
-             _lastInteractionPosition = null; _potentialInteractionStartPosition = null;
-          },
+                if (_activePointers == 0 && !widget.isInteracting) {
+                  if (currentTool == ElementType.select) {
+                    if (wasResizing) { print("End Resize"); drawingProvider.endPotentialResize(); }
+                    else if (wasMoving) { print("End Move"); drawingProvider.endPotentialMove(); }
+                    else if (interactedElement != null) { print("Tap on element: ${interactedElement.id}"); if (interactedElement is VideoElement) { drawingProvider.toggleVideoPlayback(interactedElement.id); } }
+                    else { print("Tap on empty space."); }
+                  }
+                  else if (currentTool == ElementType.pen) { drawingProvider.endDrawing(); }
+                  else if (currentTool == ElementType.text) { _showTextDialog(context, drawingProvider, tapPosition); } // Pass localPosition (start pos)
+                }
+              },
 
-          behavior: HitTestBehavior.opaque,
-          child: CustomPaint(
-            painter: DrawingPainter(
-              elements: currentElements, currentElement: currentDrawingElement,
-              selectedIds: selectedIds, // Pass correct field name from tuple data
-              currentTransform: transform,
+              onPointerCancel: (PointerCancelEvent event) {
+                 if (!mounted) return; print("Pointer Cancelled");
+                 _cancelMoveTimer(); bool wasMoving = _isMovingElement; bool wasResizing = _isResizingElement;
+                 if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) { drawingProvider.discardDrawing(); }
+                 else if (wasResizing) { drawingProvider.endPotentialResize(); }
+                 else if (wasMoving) { drawingProvider.endPotentialMove(); }
+                 setState(() { _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; _isMovingElement = false; _isResizingElement = false; _draggedHandle = null; _elementBeingInteractedWith = null; });
+                 _lastInteractionPosition = null; _potentialInteractionStartPosition = null;
+              },
+
+              behavior: HitTestBehavior.opaque,
+              child: Stack(
+                children: [
+                  // Background canvas with CustomPaint
+                  CustomPaint(
+                    painter: DrawingPainter(
+                      elements: currentElements, 
+                      currentElement: currentDrawingElement,
+                      selectedIds: selectedIds, 
+                      currentTransform: transform,
+                      excludeVideoContent: true, // Exclude video content from canvas painting
+                    ),
+                    isComplex: selectedIds.isNotEmpty || currentDrawingElement != null,
+                    willChange: _isMovingElement || _isResizingElement || currentDrawingElement != null,
+                    size: Size.infinite,
+                    child: Container(color: Colors.transparent),
+                  ),
+                  
+                  // Video players integrated directly in the canvas transform space
+                  ...videoElements.map((videoElement) {
+                    final bounds = videoElement.bounds;
+                    
+                    // Only render the video if it's initialized
+                    if (!videoElement.controller.value.isInitialized) {
+                      return const SizedBox.shrink();
+                    }
+                    
+                    return Positioned(
+                      left: bounds.left,
+                      top: bounds.top,
+                      width: bounds.width,
+                      height: bounds.height,
+                      child: IgnorePointer(
+                        child: VideoPlayer(videoElement.controller),
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
             ),
-            isComplex: selectedIds.isNotEmpty || currentDrawingElement != null,
-            willChange: _isMovingElement || _isResizingElement || currentDrawingElement != null,
-            size: Size.infinite,
-            child: Container(color: Colors.transparent),
-          ),
+          ],
         );
       },
     );
@@ -216,11 +255,14 @@ class DrawingPainter extends CustomPainter {
   // Use the correct field name from the provider/selector data
   final List<String> selectedIds; // Changed from selectedElementIds for consistency IF tuple uses selectedIds
   final Matrix4 currentTransform;
+  final bool excludeVideoContent;
 
   DrawingPainter({
-    required this.elements, this.currentElement,
+    required this.elements, 
+    this.currentElement,
     required this.selectedIds, // Use the name passed from the builder
     required this.currentTransform,
+    this.excludeVideoContent = false,
   });
 
   @override
@@ -230,7 +272,15 @@ class DrawingPainter extends CustomPainter {
     final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
 
     for (final element in elements) {
-      element.render(canvas, inverseScale: inverseScale);
+      // Skip rendering video content in the custom painter if excludeVideoContent is true
+      // This prevents double-drawing the video frame which can cause flickering
+      if (excludeVideoContent && element is VideoElement) {
+        // Only draw the video's placeholder/background/controls, not the actual video content
+        element.render(canvas, inverseScale: inverseScale);
+      } else {
+        element.render(canvas, inverseScale: inverseScale);
+      }
+      
       // Use the selectedIds list passed to the painter
       if (selectedIds.length == 1 && selectedIds.first == element.id) {
         _drawSelectionHandles(canvas, element, inverseScale);
@@ -260,6 +310,7 @@ class DrawingPainter extends CustomPainter {
     if (!listEquals(selectedIds, oldDelegate.selectedIds)) return true; // Correct
     if (currentElement != oldDelegate.currentElement) return true;
     if (!listEquals(elements, oldDelegate.elements)) return true; // Use listEquals for element list too if refs might not change
+    if (excludeVideoContent != oldDelegate.excludeVideoContent) return true;
     return false;
   }
 }

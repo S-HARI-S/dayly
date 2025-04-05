@@ -4,6 +4,8 @@ import 'package:video_player/video_player.dart';
 import 'dart:ui' as ui;
 import 'element.dart';
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:math' as math;
 
 class VideoElement extends DrawingElement {
   final String videoUrl;
@@ -20,7 +22,6 @@ class VideoElement extends DrawingElement {
     required this.size,
   }) : _showPlayIconNotifier = ValueNotifier(!controller.value.isPlaying),
        super(id: id, type: ElementType.video, position: position, isSelected: isSelected) {
-    // Just add the listener directly - no assignment needed
     controller.addListener(_onVideoStateChanged);
     _onVideoStateChanged(); // Update initial state
   }
@@ -61,9 +62,28 @@ class VideoElement extends DrawingElement {
   @override
   void render(Canvas canvas, {double inverseScale = 1.0}) { 
     final dst = bounds;
+    
+    // Draw black background
     final ph = Paint()..color = Colors.black87;
     canvas.drawRect(dst, ph);
     
+    // Note: The actual video frames are rendered by VideoPlayer widget
+    // Here we only render a placeholder and controls
+    
+    // If video isn't initialized, show a loading indicator
+    if (!controller.value.isInitialized) {
+      final loadingPaint = Paint()
+        ..color = Colors.white.withOpacity(0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0 * inverseScale;
+      // Draw a circular loading indicator
+      final center = dst.center;
+      final radius = math.min(dst.width, dst.height) * 0.2;
+      canvas.drawCircle(center, radius, loadingPaint);
+      canvas.drawCircle(center, radius, loadingPaint);
+    }
+
+    // Draw play/pause icon overlay
     final iconC = Colors.white.withOpacity(0.9);
     final iconP = Paint()..color = iconC;
     final iconS = (size.shortestSide * 0.3).clamp(15.0, 60.0);
