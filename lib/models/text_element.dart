@@ -7,8 +7,11 @@ import 'element.dart';
 class TextElement extends DrawingElement {
   final String text;
   final Color color;
-  final double fontSize; // Added font size property
-  // Add other text properties like fontWeight, fontFamily etc. if needed
+  final double fontSize;
+  final String fontFamily;
+  final FontWeight fontWeight;
+  final FontStyle fontStyle;
+  final TextAlign textAlign;
 
   // Internal TextPainter for layout and rendering
   late final TextPainter _textPainter;
@@ -19,7 +22,11 @@ class TextElement extends DrawingElement {
     bool isSelected = false,
     required this.text,
     required this.color,
-    this.fontSize = 24.0, // Default font size
+    this.fontSize = 24.0,
+    this.fontFamily = 'Roboto', // Default font family
+    this.fontWeight = FontWeight.normal,
+    this.fontStyle = FontStyle.normal,
+    this.textAlign = TextAlign.left,
   }) : super(id: id, type: ElementType.text, position: position, isSelected: isSelected) {
     // Initialize TextPainter immediately
     _updateTextPainter();
@@ -33,10 +40,13 @@ class TextElement extends DrawingElement {
         style: TextStyle(
           color: color,
           fontSize: fontSize,
-          // Add other styles (fontWeight, fontFamily) here
+          fontFamily: fontFamily,
+          fontWeight: fontWeight,
+          fontStyle: fontStyle,
         ),
       ),
-      textDirection: ui.TextDirection.ltr, // Or determine based on locale
+      textAlign: textAlign,
+      textDirection: ui.TextDirection.ltr,
     )..layout(); // Perform layout to calculate size
   }
 
@@ -50,17 +60,7 @@ class TextElement extends DrawingElement {
 
   @override
   void render(Canvas canvas, {double inverseScale = 1.0}) {
-    // Paint the text at the element's position
     _textPainter.paint(canvas, position);
-
-    // Optional: Draw selection highlight using bounds
-    // if (isSelected) {
-    //   final selectionPaint = Paint()
-    //     ..color = Colors.blue.withAlpha(80)
-    //     ..style = PaintingStyle.stroke
-    //     ..strokeWidth = 1.5 * inverseScale;
-    //   canvas.drawRect(bounds, selectionPaint);
-    // }
   }
 
   @override
@@ -71,29 +71,33 @@ class TextElement extends DrawingElement {
     String? text,
     Color? color,
     double? fontSize,
-    Size? size, // Size parameter for resizing (likely changes font size)
+    String? fontFamily,
+    FontWeight? fontWeight,
+    FontStyle? fontStyle,
+    TextAlign? textAlign,
+    Size? size,
   }) {
     double finalFontSize = fontSize ?? this.fontSize;
 
-    // --- Handle Resizing ---
-    // Simplest way to resize text is to adjust font size based on height change.
-    // Assumes resizing is proportional or primarily vertical.
     if (size != null) {
-        Rect oldBounds = bounds; // Bounds based on current font size
+        Rect oldBounds = bounds;
         if (!oldBounds.isEmpty && oldBounds.height > 0) {
             double scaleY = size.height / oldBounds.height;
-            // Adjust font size proportionally (clamp to reasonable limits)
             finalFontSize = (this.fontSize * scaleY).clamp(8.0, 500.0);
         }
     }
 
     return TextElement(
       id: id ?? this.id,
-      position: position ?? this.position, // Update position if provided
+      position: position ?? this.position,
       isSelected: isSelected ?? this.isSelected,
-      text: text ?? this.text, // Update text if provided
+      text: text ?? this.text,
       color: color ?? this.color,
-      fontSize: finalFontSize, // Use potentially updated font size
+      fontSize: finalFontSize,
+      fontFamily: fontFamily ?? this.fontFamily,
+      fontWeight: fontWeight ?? this.fontWeight,
+      fontStyle: fontStyle ?? this.fontStyle,
+      textAlign: textAlign ?? this.textAlign,
     );
   }
 
@@ -102,35 +106,43 @@ class TextElement extends DrawingElement {
     return TextElement(
       id: id,
       position: position,
-      isSelected: false, // Selection is transient
+      isSelected: false,
       text: text,
       color: color,
       fontSize: fontSize,
+      fontFamily: fontFamily,
+      fontWeight: fontWeight,
+      fontStyle: fontStyle,
+      textAlign: textAlign,
     );
   }
-  
+
   // --- Serialization Methods ---
-  
+
   @override
   Map<String, dynamic> toMap() {
     return {
+      'elementType': 'text', // Ensure type is saved
       'id': id,
       'position': {'dx': position.dx, 'dy': position.dy},
       'isSelected': isSelected,
       'text': text,
-      'color': color.value, // Store color as integer value
+      'color': color.value,
       'fontSize': fontSize,
+      'fontFamily': fontFamily,
+      'fontWeight': fontWeight.index, // Store enum index
+      'fontStyle': fontStyle.index,
+      'textAlign': textAlign.index,
     };
   }
-  
+
   static TextElement fromMap(Map<String, dynamic> map) {
-    // Parse position
     final posMap = map['position'];
     final position = Offset(
-      posMap['dx'] as double, 
+      posMap['dx'] as double,
       posMap['dy'] as double
     );
-    
+
     return TextElement(
       id: map['id'],
       position: position,
@@ -138,6 +150,10 @@ class TextElement extends DrawingElement {
       text: map['text'],
       color: Color(map['color']),
       fontSize: map['fontSize'] ?? 24.0,
+      fontFamily: map['fontFamily'] ?? 'Roboto',
+      fontWeight: FontWeight.values[map['fontWeight'] ?? FontWeight.normal.index],
+      fontStyle: FontStyle.values[map['fontStyle'] ?? FontStyle.normal.index],
+      textAlign: TextAlign.values[map['textAlign'] ?? TextAlign.left.index],
     );
   }
 }

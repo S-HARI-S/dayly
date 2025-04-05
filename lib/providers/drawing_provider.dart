@@ -691,6 +691,55 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
     }
   }
 
+  // --- Element Modification Methods ---
+
+  void updateSelectedElementProperties(Map<String, dynamic> updates) {
+    if (selectedElementIds.isEmpty) return;
+    saveToUndoStack();
+    List<DrawingElement> updatedElements = List.from(elements);
+    bool changed = false;
+
+    for (int i = 0; i < updatedElements.length; i++) {
+      if (selectedElementIds.contains(updatedElements[i].id)) {
+        try {
+          // Apply updates using copyWith dynamically
+          // This is a simplified example; real implementation might need
+          // specific checks per element type or a more robust reflection mechanism.
+          var current = updatedElements[i];
+          if (current is PenElement && updates.containsKey('color')) {
+             updatedElements[i] = current.copyWith(color: updates['color'] as Color);
+             changed = true;
+          }
+          if (current is PenElement && updates.containsKey('strokeWidth')) {
+             updatedElements[i] = current.copyWith(strokeWidth: updates['strokeWidth'] as double);
+             changed = true;
+          }
+          if (current is TextElement) {
+            updatedElements[i] = current.copyWith(
+                text: updates['text'] as String?,
+                color: updates['color'] as Color?,
+                fontSize: updates['fontSize'] as double?,
+                fontFamily: updates['fontFamily'] as String?,
+                fontWeight: updates['fontWeight'] as FontWeight?,
+                fontStyle: updates['fontStyle'] as FontStyle?,
+                textAlign: updates['textAlign'] as TextAlign?,
+            );
+             changed = true;
+          }
+          // Add similar blocks for other element types and properties
+
+        } catch (e, s) {
+          print("Error updating element ${updatedElements[i].id}: $e\n$s");
+        }
+      }
+    }
+
+    if (changed) {
+      elements = updatedElements;
+      notifyListeners();
+    }
+  }
+
   // --- Cleanup ---
   @override
   void dispose() {
