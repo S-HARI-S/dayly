@@ -14,6 +14,7 @@ import '../models/pen_element.dart';
 import '../models/text_element.dart';
 import '../models/image_element.dart';
 import '../models/video_element.dart';
+import '../models/gif_element.dart'; // Add this import
 import 'drawing_provider.dart';
 
 class CalendarProvider extends ChangeNotifier {
@@ -403,6 +404,11 @@ class CalendarProvider extends ChangeNotifier {
               element = await _recreateVideoElement(elementMap);
               break;
               
+            case 'gif':
+              // For GIFs, we need to reconstruct the element with the URLs
+              element = _recreateGifElement(elementMap);
+              break;
+              
             default:
               print('Unknown element type: $elementType');
               break;
@@ -521,6 +527,42 @@ class CalendarProvider extends ChangeNotifier {
       );
     } catch (e) {
       print('Error recreating video element: $e');
+      return null;
+    }
+  }
+  
+  // Helper to recreate a GifElement from serialized data
+  GifElement? _recreateGifElement(Map<String, dynamic> map) {
+    try {
+      // Parse position
+      final posMap = map['position'];
+      final position = Offset(
+        posMap['dx'] as double,
+        posMap['dy'] as double
+      );
+      
+      // Parse size
+      final sizeMap = map['size'];
+      final size = Size(
+        sizeMap['width'] as double,
+        sizeMap['height'] as double
+      );
+      
+      // Get URLs
+      final String gifUrl = map['gifUrl'];
+      final String? previewUrl = map['previewUrl'];
+      
+      // Create and return the GifElement
+      return GifElement(
+        id: map['id'],
+        position: position,
+        isSelected: map['isSelected'] ?? false,
+        size: size,
+        gifUrl: gifUrl,
+        previewUrl: previewUrl,
+      );
+    } catch (e) {
+      print('Error recreating GIF element: $e');
       return null;
     }
   }
