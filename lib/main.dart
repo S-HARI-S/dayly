@@ -9,6 +9,7 @@ import 'widgets/drawing_canvas.dart';
 import 'screens/calendar_screen.dart';
 import 'models/element.dart';
 import 'models/calendar_entry.dart';
+import 'widgets/contextual_toolbar.dart'; // Import the toolbar
 
 // Load environment variables before running the app
 Future<void> main() async {
@@ -366,11 +367,8 @@ class _DrawingBoardState extends State<DrawingBoard> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
-        onPressed: () => _createNewCanvas(),
-        tooltip: 'Create New Canvas',
-      ),
+      // Add the toolbar to the main drawing screen
+      bottomNavigationBar: const ContextualToolbar(),
     );
   }
 
@@ -622,7 +620,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
   }
 }
 
-// Reusable Tool Button Widget
+// Reusable Tool Button Widget with improved touch target and accessibility
 class ToolButton extends StatelessWidget {
   final IconData icon;
   final bool isSelected;
@@ -639,27 +637,29 @@ class ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double buttonSize = 44.0; // Increased button size for better touch target
+    
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Tooltip(
         message: tooltip,
+        waitDuration: const Duration(milliseconds: 500), // Show tooltip after a short delay
         child: Material(
-          // Use theme colors for selection
           color: isSelected ? Theme.of(context).primaryColorLight : Colors.transparent,
           shape: const CircleBorder(),
           elevation: isSelected ? 4 : 0, // More elevation when selected
           child: InkWell(
             onTap: onPressed,
-            customBorder: const CircleBorder(), // Ensure ripple effect is circular
+            customBorder: const CircleBorder(),
             child: Container(
-              width: 40,
-              height: 40,
+              width: buttonSize,
+              height: buttonSize,
               alignment: Alignment.center,
               child: Icon(
                 icon,
-                // Use theme colors
                 color: isSelected ? Theme.of(context).primaryColorDark : Colors.black54,
-                size: 20, // Slightly smaller icon
+                size: 22, // Slightly larger icon
+                semanticLabel: tooltip, // Add semantic label for accessibility
               ),
             ),
           ),

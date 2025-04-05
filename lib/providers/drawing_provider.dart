@@ -21,6 +21,7 @@ import '../models/image_element.dart';
 import '../models/video_element.dart';
 import '../models/gif_element.dart';
 import '../models/handles.dart';
+import '../services/background_removal_service.dart';
 
 class DrawingProvider extends ChangeNotifier {
   // --- State Properties ---
@@ -43,8 +44,38 @@ class DrawingProvider extends ChangeNotifier {
   // Unique ID generator
   final _uuid = const Uuid();
 
+  // Ensure proper initialization and clearer debug logging
+  bool _showContextToolbar = false;
+  bool get showContextToolbar {
+    final isVisible = _showContextToolbar && selectedElementIds.isNotEmpty;
+    if (_showContextToolbar && selectedElementIds.isEmpty) {
+      print("WARNING: Context toolbar flag is true but no selected elements");
+    }
+    return isVisible;
+  }
+  
+  set showContextToolbar(bool value) {
+    if (_showContextToolbar != value) {
+      _showContextToolbar = value;
+      
+      // Don't enable toolbar if no elements are selected
+      if (value && selectedElementIds.isEmpty) {
+        print("Warning: Attempting to show toolbar with no selected elements - ignoring");
+        return; // Don't update state or notify listeners
+      }
+      
+      print("Context toolbar visibility set to: $value (selected elements: ${selectedElementIds.length})");
+      notifyListeners();
+    }
+  }
+
   // --- Tool and Style Management ---
   void setTool(ElementType tool) {
+    // Hide toolbar when changing tools
+    if (tool != currentTool) {
+      _showContextToolbar = false;
+    }
+    
     currentTool = tool;
     clearSelection();
     notifyListeners();
@@ -147,7 +178,6 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   // --- GIF Handling ---
-// In lib/providers/drawing_provider.dart
 
   Future<void> searchAndAddGif(BuildContext context, TransformationController controller) async {
     print("--- Starting searchAndAddGif ---");
@@ -411,34 +441,61 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
   void selectElementAt(Offset position) {
     final DrawingElement? hitElement = elements.lastWhereOrNull((e) => e.containsPoint(position));
     bool selectionChanged = false;
+    
     if (hitElement != null) {
+      // Always show toolbar when selecting an element
+      _showContextToolbar = true; 
+      
+      // Update selection if needed
       if (!(selectedElementIds.length == 1 && selectedElementIds.first == hitElement.id)) {
-         clearSelection(notify: false);
-         selectedElementIds.add(hitElement.id);
-         selectionChanged = true;
-         print("Selected element ${hitElement.id}");
+        clearSelection(notify: false);
+        selectedElementIds.add(hitElement.id);
+        selectionChanged = true;
+        print("Selected element ${hitElement.id} - showing toolbar");
+      } else {
+        // Force notify even if selection didn't change
+        selectionChanged = true;
       }
+      
     } else {
       if (selectedElementIds.isNotEmpty) {
-         clearSelection(notify: false);
-         selectionChanged = true;
-         print("Clearing selection");
+        clearSelection(notify: false);
+        _showContextToolbar = false;
+        selectionChanged = true;
+        print("Clearing selection - hiding toolbar");
       }
     }
+    
     if (selectionChanged) {
-       notifyListeners();
+      notifyListeners();
     }
   }
 
   void selectElement(DrawingElement element) {
       clearSelection(notify: false);
       selectedElementIds.add(element.id);
+      _showContextToolbar = true;
       notifyListeners();
+  }
+
+  // Make the showContextToolbarForElement method more robust
+  void showContextToolbarForElement(String elementId) {
+    // Check if element exists
+    final element = elements.firstWhereOrNull((e) => e.id == elementId);
+    if (element != null) {
+      // Make sure we set the flag and notify listeners
+      if (!_showContextToolbar) {
+        _showContextToolbar = true;
+        notifyListeners();
+        print("Showing context toolbar for element $elementId");
+      }
+    }
   }
 
   void clearSelection({bool notify = true}) {
     if (selectedElementIds.isEmpty) return;
     selectedElementIds.clear();
+    _showContextToolbar = false;
     if (notify) {
       notifyListeners();
     }
@@ -589,6 +646,49 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
     redoStack.clear();
     notifyListeners();
     print("Loaded ${elements.length} elements.");
+  }
+
+  // --- Background Removal ---
+  Future<void> removeImageBackground(String elementId) async {
+    // Find the image element by ID
+    final index = elements.indexWhere((el) => el.id == elementId);
+    if (index == -1) {
+      throw Exception('Element not found');
+    }
+    
+    final element = elements[index];
+    if (element is! ImageElement) {
+      throw Exception('Selected element is not an image');
+    }
+    
+    // Save current state to undo stack
+    saveToUndoStack();
+    
+    try {
+      // Use the service to remove background
+      final processedImage = await BackgroundRemovalService.removeBackground(element.image);
+      
+      // Create a new image element with the processed image
+      final newElement = ImageElement(
+        id: element.id,  // Keep the same ID
+        position: element.position,
+        isSelected: element.isSelected,
+        image: processedImage,
+        size: element.size,
+        imagePath: element.imagePath,  // Keep the same path reference
+      );
+      
+      // Replace the old element with the new one
+      List<DrawingElement> updatedElements = List.from(elements);
+      updatedElements[index] = newElement;
+      elements = updatedElements;
+      
+      notifyListeners();
+      
+    } catch (e) {
+      print('Error removing background: $e');
+      rethrow;  // Re-throw the error to be handled by the UI
+    }
   }
 
   // --- Cleanup ---
