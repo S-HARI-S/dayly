@@ -56,6 +56,32 @@ class _DrawingBoardState extends State<DrawingBoard> {
   void initState() {
     super.initState();
     _transformationController = TransformationController();
+    
+    // Center the canvas initially by setting the transform to translate to the center
+    // Schedule this for after the initial layout is complete
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _centerCanvas();
+    });
+  }
+  
+  // Helper method to center the canvas
+  void _centerCanvas() {
+    // Get the canvas center coordinates (half of our large canvas size)
+    final canvasCenter = const Offset(50000, 50000);
+    
+    // Get the screen size to determine where the viewport center is
+    final Size screenSize = MediaQuery.of(context).size;
+    
+    // Create a translation matrix that positions the center of the canvas
+    // at the center of the screen
+    final Matrix4 matrix = Matrix4.identity()
+      ..translate(
+        screenSize.width / 2 - canvasCenter.dx,
+        screenSize.height / 2 - canvasCenter.dy,
+      );
+      
+    // Set the transformation
+    _transformationController.value = matrix;
   }
 
   @override
@@ -145,8 +171,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
             behavior: HitTestBehavior.translucent,
             child: InteractiveViewer(
               transformationController: _transformationController,
-              boundaryMargin: const EdgeInsets.all(double.infinity), // Infinite panning
-              minScale: 0.05,
+              boundaryMargin: const EdgeInsets.all(0),
               maxScale: 10.0,
               // Only enable pan and zoom with 2+ fingers (or ctrl+scroll/alt+scroll on web/desktop)
               panEnabled: _pointerCount >= 2,
@@ -155,7 +180,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
               child: Container(
                 // Define a large but finite canvas area
                 // Using double.infinity can cause layout issues in some cases
-                width: 100000,
+                width: 100000 ,
                 height: 100000,
                 color: Colors.white, // Background color of the canvas area
                 alignment: Alignment.center, // Center the DrawingCanvas initially

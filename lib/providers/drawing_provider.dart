@@ -122,7 +122,7 @@ class DrawingProvider extends ChangeNotifier {
     
     try {
       undoStack.add(elements.map((e) => e.clone()).toList());
-      if(undoStack.length > maxUndoSteps) undoStack.removeAt(0);
+      if(undoStack.length > maxUndoSteps) redoStack.removeAt(0);
     } catch(e) {
       print("Error saving current state: $e");
     }
@@ -137,12 +137,18 @@ class DrawingProvider extends ChangeNotifier {
   Offset _getCanvasCenter(TransformationController controller, BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     final Offset screenCenter = Offset(screenSize.width / 2, screenSize.height / 2);
+    
     try {
+      // First, calculate the center point of our large canvas area (100000x100000)
+      final Offset canvasCenter = const Offset(50000, 50000);
+      
+      // Then transform this canvas center point using the current transformation
+      // We need to use the transformation matrix to get the correct position in view coordinates
       final Matrix4 inverseMatrix = Matrix4.inverted(controller.value);
       return MatrixUtils.transformPoint(inverseMatrix, screenCenter);
     } catch (e) {
       print("Error getting canvas center: $e. Using default.");
-      return const Offset(50000, 50000);
+      return const Offset(50000, 50000); // Fallback to the center of our large canvas
     }
   }
   
