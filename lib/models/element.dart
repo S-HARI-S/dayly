@@ -12,6 +12,7 @@ enum ElementType {
   arrow, // Placeholder
   image,
   video,
+  gif,  // Added GIF type
   group // Placeholder
 }
 

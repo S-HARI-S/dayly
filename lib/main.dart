@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Add this import
 import 'providers/drawing_provider.dart';
 import 'providers/calendar_provider.dart';
 import 'widgets/drawing_canvas.dart';
@@ -9,7 +10,11 @@ import 'screens/calendar_screen.dart';
 import 'models/element.dart';
 import 'models/calendar_entry.dart';
 
-void main() {
+// Load environment variables before running the app
+Future<void> main() async {
+  // Load .env file
+  await dotenv.load();
+  
   runApp(
     MultiProvider(
       providers: [
@@ -256,6 +261,17 @@ class _DrawingBoardState extends State<DrawingBoard> {
                               .addVideoFromGallery(context, _transformationController);
                           },
                           tooltip: 'Add Video',
+                        ),
+                        ToolButton(
+                          icon: Icons.gif_box,
+                          isSelected: false, // Not a persistent tool
+                          onPressed: () {
+                            _isNewCanvas = false; // Mark as edited when adding media
+                            _isSaved = false; // Mark as unsaved when adding media
+                            Provider.of<DrawingProvider>(context, listen: false)
+                              .searchAndAddGif(context, _transformationController);
+                          },
+                          tooltip: 'Search & Add GIF',
                         ),
 
                         const Divider(height: 16), // Separator

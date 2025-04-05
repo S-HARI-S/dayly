@@ -23,12 +23,15 @@ dependencies:
   # --- Media ---
   image_picker: ^1.1.2 # Latest stable version
   video_player: ^2.8.7 # Latest stable version
+  giphy_picker: ^3.0.1 # For GIF search and selection
+  http: ^1.2.0 # For HTTP requests (downloading GIF previews)
 
   # --- Utilities ---
   vector_math: ^2.1.4 # Latest stable version (usually stable)
   collection: ^1.18.0 # Recommended for listEquals, firstWhereOrNull etc.
   path_provider: ^2.1.5 # For accessing device file system
   uuid: ^4.5.1 # For generating unique IDs
+  flutter_dotenv: ^5.1.0 # For environment variables
 
   # --- Icons ---
   cupertino_icons: ^1.0.8 # Latest stable version (usually stable)
@@ -46,9 +49,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # --- Assets (Uncomment and add yours if needed) ---
-  # assets:
-  #   - images/
+  # Assets section for .env file
+  assets:
+    - .env
 
   # --- Fonts (Uncomment and add yours if needed) ---
   # fonts:
