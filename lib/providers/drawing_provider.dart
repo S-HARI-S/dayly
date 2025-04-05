@@ -42,7 +42,38 @@ class DrawingProvider extends ChangeNotifier {
   }
   
   void setColor(Color color) {
+    // Update current color for new elements
     currentColor = color;
+    
+    // If elements are selected and in select mode, update their colors
+    if (currentTool == ElementType.select && selectedElementIds.isNotEmpty) {
+      // Save current state to undo stack before changing colors
+      saveToUndoStack();
+      
+      bool changed = false;
+      List<DrawingElement> updatedElements = List.from(elements);
+      
+      for (int i = 0; i < updatedElements.length; i++) {
+        if (selectedElementIds.contains(updatedElements[i].id)) {
+          // Only update color for elements that support color changes
+          if (updatedElements[i] is PenElement || updatedElements[i] is TextElement) {
+            // Use copyWith to create a new element with updated color
+            if (updatedElements[i] is PenElement) {
+              updatedElements[i] = (updatedElements[i] as PenElement).copyWith(color: color);
+              changed = true;
+            } else if (updatedElements[i] is TextElement) {
+              updatedElements[i] = (updatedElements[i] as TextElement).copyWith(color: color);
+              changed = true;
+            }
+          }
+        }
+      }
+      
+      if (changed) {
+        elements = updatedElements;
+      }
+    }
+    
     notifyListeners();
   }
   
