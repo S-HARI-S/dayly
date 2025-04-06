@@ -227,8 +227,22 @@ class ContextualToolbar extends StatelessWidget {
             onPressed: drawingProvider.deleteSelected,
           ),
         );
-        
-        // Add Duplicate, Bring Forward, Send Backward later if needed
+        actions.add(
+          IconButton(
+            icon: const Icon(Icons.flip_to_front_outlined), // Or Icons.arrow_upward
+            tooltip: 'Bring Forward',
+            onPressed: drawingProvider.bringSelectedForward, // We'll add this method
+          ),
+        );
+         actions.add(
+          IconButton(
+            icon: const Icon(Icons.flip_to_back_outlined), // Or Icons.arrow_downward
+            tooltip: 'Send Backward',
+            onPressed: drawingProvider.sendSelectedBackward, // We'll add this method
+          ),
+        );
+
+        // Add Duplicate later if needed
 
         // --- Specific Actions ---
         if (isSingleSelection && singleElement != null) {

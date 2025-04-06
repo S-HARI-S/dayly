@@ -86,25 +86,27 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         selectedElementIds: provider.selectedElementIds,
         current: provider.currentElement
       ),
-      shouldRebuild: (previous, next) => 
-        previous.elements != next.elements || 
-        !listEquals(previous.selectedElementIds, next.selectedElementIds) || 
-        previous.current != next.current,
+      shouldRebuild: (previous, next) {
+        // More robust check: rebuild if list instance changes OR content/order changes
+        final elementsChanged = !identical(previous.elements, next.elements) ||
+                                !listEquals(previous.elements, next.elements);
+        final selectionChanged = !listEquals(previous.selectedElementIds, next.selectedElementIds);
+        final currentChanged = previous.current != next.current;
+        // Optional: Log which part changed
+        // if (elementsChanged) print("Canvas rebuild: elements changed");
+        // if (selectionChanged) print("Canvas rebuild: selection changed");
+        // if (currentChanged) print("Canvas rebuild: current element changed");
+        return elementsChanged || selectionChanged || currentChanged;
+      },
       builder: (context, data, child) {
         final currentElements = data.elements;
         final selectedIds = data.selectedElementIds;
         final currentDrawingElement = data.current;
         final transform = widget.transformationController.value;
 
-        // Get video elements from the list of elements
-        final List<VideoElement> videoElements = currentElements
-            .whereType<VideoElement>()
-            .toList();
-
-        // Get GIF elements from the list of elements
-        final List<GifElement> gifElements = currentElements
-            .whereType<GifElement>()
-            .toList();
+        // --- Add Logging Here ---
+        print("--- DrawingCanvas Rendering (${currentElements.length} elements) ---");
+        // --- End Logging ---
 
         return Stack(
           fit: StackFit.expand,
@@ -331,97 +333,120 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               behavior: HitTestBehavior.opaque, // Capture all events within bounds
               child: Stack(
                 children: [
-                  // Background canvas with CustomPaint
-                  CustomPaint(
-                    painter: DrawingPainter(
-                      elements: currentElements,
-                      currentElement: currentDrawingElement,
-                      selectedIds: selectedIds,
-                      currentTransform: transform,
-                      excludeVideoContent: true, // Exclude video content from canvas painting
-                      excludeGifContent: true,   // Exclude GIF content from canvas painting
-                    ),
-                    isComplex: selectedIds.isNotEmpty || currentDrawingElement != null,
-                    willChange: _isMovingElement || _isResizingElement || currentDrawingElement != null,
-                    size: Size.infinite, // Allow painter to draw anywhere
-                    child: Container(color: Colors.transparent), // Needs a child for hit testing
-                  ),
+                  // Render elements individually. Lower index = bottom layer.
+                  ...List.generate(currentElements.length, (index) {
+                    final element = currentElements[index];
+                    // --- Add Logging Here ---
+                    print("  Rendering Index $index: ${element.id} (${element.type})");
+                    // --- End Logging ---
 
-                  // ---- START: GIF Rendering ----
-                  // Render GIF elements using Image.network widgets positioned in the Stack
-                  ...gifElements.map((gifElement) {
-                    final bounds = gifElement.bounds;
+                    List<Widget> elementWidgets = [];
 
-                    return Positioned(
-                      left: bounds.left,
-                      top: bounds.top,
-                      width: bounds.width,
-                      height: bounds.height,
-                      child: IgnorePointer( // Ignore pointer events for the GIF itself
-                        child: Image.network(
-                          gifElement.gifUrl,
-                          fit: BoxFit.fill,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Center(
-                              child: CircularProgressIndicator(
-                                value: loadingProgress.expectedTotalBytes != null
-                                    ? loadingProgress.cumulativeBytesLoaded / 
-                                      loadingProgress.expectedTotalBytes!
-                                    : null,
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return gifElement.previewUrl != null
-                                ? Image.network(
-                                    gifElement.previewUrl!,
-                                    fit: BoxFit.fill,
-                                    errorBuilder: (_, __, ___) =>
-                                        Container(
-                                          color: Colors.grey[300], 
-                                          child: const Icon(Icons.broken_image)
-                                        ),
-                                  )
-                                : Container(
-                                    color: Colors.grey[300], 
-                                    child: const Icon(Icons.broken_image)
-                                  );
-                          },
+                    // 1. Render the element content
+                    if (element is GifElement) {
+                      final bounds = element.bounds;
+                      elementWidgets.add(
+                        Positioned(
+                          left: bounds.left,
+                          top: bounds.top,
+                          width: bounds.width,
+                          height: bounds.height,
+                          child: IgnorePointer(
+                            child: Image.network(
+                              element.gifUrl,
+                              fit: BoxFit.fill,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return Center(
+                                  child: CircularProgressIndicator(
+                                    value: loadingProgress.expectedTotalBytes != null
+                                        ? loadingProgress.cumulativeBytesLoaded /
+                                            loadingProgress.expectedTotalBytes!
+                                        : null,
+                                  ),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                return element.previewUrl != null
+                                    ? Image.network(
+                                        element.previewUrl!,
+                                        fit: BoxFit.fill,
+                                        errorBuilder: (_, __, ___) => Container(
+                                            color: Colors.grey[300],
+                                            child: const Icon(Icons.broken_image)),
+                                      )
+                                    : Container(
+                                        color: Colors.grey[300],
+                                        child: const Icon(Icons.broken_image));
+                              },
+                            ),
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
-                  // ---- END: GIF Rendering ----
-
-                  // Video players integrated directly in the canvas transform space
-                  ...videoElements.map((videoElement) {
-                    final bounds = videoElement.bounds;
-
-                    // Only render the video if it's initialized
-                    if (!videoElement.controller.value.isInitialized) {
-                      return Positioned(
-                        left: bounds.left, 
-                        top: bounds.top, 
-                        width: bounds.width, 
-                        height: bounds.height,
-                        child: Container(
-                          color: Colors.black, 
-                          child: const Center(child: CircularProgressIndicator())
-                        ),
+                      );
+                    } else if (element is VideoElement) {
+                      final bounds = element.bounds;
+                      if (!element.controller.value.isInitialized) {
+                        elementWidgets.add(
+                          Positioned(
+                            left: bounds.left,
+                            top: bounds.top,
+                            width: bounds.width,
+                            height: bounds.height,
+                            child: Container(
+                                color: Colors.black,
+                                child: const Center(child: CircularProgressIndicator())),
+                          ),
+                        );
+                      } else {
+                        elementWidgets.add(
+                          Positioned(
+                            left: bounds.left,
+                            top: bounds.top,
+                            width: bounds.width,
+                            height: bounds.height,
+                            child: IgnorePointer(
+                              child: VideoPlayer(element.controller),
+                            ),
+                          ),
+                        );
+                      }
+                    } else {
+                      // Use CustomPaint for other types (Pen, Text, Image)
+                      elementWidgets.add(
+                        CustomPaint(
+                          painter: ElementPainter(element: element, currentTransform: transform),
+                          size: Size.infinite, 
+                          // Optimization: repaint only if element changes?
+                          // isComplex: true, 
+                          // willChange: true, 
+                        )
                       );
                     }
 
-                    return Positioned(
-                      left: bounds.left,
-                      top: bounds.top,
-                      width: bounds.width,
-                      height: bounds.height,
-                      child: IgnorePointer( // Video should not capture pointer events handled by the Listener
-                        child: VideoPlayer(videoElement.controller),
-                      ),
-                    );
-                  }).toList(),
+                     // 2. Render selection handles on top if selected
+                    if (selectedIds.contains(element.id)) {
+                      elementWidgets.add(
+                         CustomPaint(
+                           painter: SelectionPainter(element: element, currentTransform: transform),
+                           size: Size.infinite,
+                         )
+                      );
+                    }
+
+                    return Stack(
+                      // Use a key that includes the index to ensure rebuild on order change
+                      key: ValueKey('element-${element.id}-$index'),
+                      children: elementWidgets
+                    ); // Return a Stack containing element + optional handles
+                  }),
+
+                  // Current drawing element (e.g., pen stroke) always on top during creation
+                  if (currentDrawingElement != null)
+                     CustomPaint(
+                        painter: ElementPainter(element: currentDrawingElement, currentTransform: transform),
+                        size: Size.infinite,
+                     ),
+
                 ],
               ),
             ),
@@ -623,58 +648,45 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 }
 
-// --- DrawingPainter (Updated to exclude GIFs/Videos) ---
-class DrawingPainter extends CustomPainter {
-  final List<DrawingElement> elements;
-  final DrawingElement? currentElement;
-  final List<String> selectedIds;
+// --- NEW: ElementPainter ---
+class ElementPainter extends CustomPainter {
+  final DrawingElement element;
   final Matrix4 currentTransform;
-  final bool excludeVideoContent;
-  final bool excludeGifContent;
 
-  DrawingPainter({
-    required this.elements,
-    this.currentElement,
-    required this.selectedIds,
-    required this.currentTransform,
-    this.excludeVideoContent = false,
-    this.excludeGifContent = false,
-  });
+  ElementPainter({required this.element, required this.currentTransform});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Get correct scale
     final double scale = currentTransform.getMaxScaleOnAxis();
-    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale; // Avoid division by zero
+    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+    element.render(canvas, inverseScale: inverseScale);
+  }
 
-    for (final element in elements) {
-       // Determine if the element's content should be skipped by this painter
-       bool skipContent = (excludeVideoContent && element is VideoElement) ||
-                          (excludeGifContent && element is GifElement);
+  @override
+  bool shouldRepaint(covariant ElementPainter oldDelegate) {
+    // Repaint if element or transform changes
+    return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
+  }
+}
 
-       if (skipContent) {
-         // Still draw selection handles/outline if it's selected, even if content is skipped
-         if (selectedIds.contains(element.id)) {
-           _drawSelectionHandles(canvas, element, inverseScale);
-         }
-       } else {
-         // Render the element normally using its own render method
-         element.render(canvas, inverseScale: inverseScale);
+// --- NEW: SelectionPainter ---
+class SelectionPainter extends CustomPainter {
+  final DrawingElement element;
+  final Matrix4 currentTransform;
 
-         // Draw selection handles if needed AFTER rendering the element
-         if (selectedIds.contains(element.id)) {
-           _drawSelectionHandles(canvas, element, inverseScale);
-         }
-       }
-    }
-    // Draw the element currently being created (e.g., pen stroke) on top
-    currentElement?.render(canvas, inverseScale: inverseScale);
+  SelectionPainter({required this.element, required this.currentTransform});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+      final double scale = currentTransform.getMaxScaleOnAxis();
+      final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+      _drawSelectionHandles(canvas, element, inverseScale);
   }
 
   void _drawSelectionHandles(Canvas canvas, DrawingElement element, double inverseScale) {
     final Rect bounds = element.bounds;
     if (bounds.isEmpty) return;
-    
+
     final double handleSize = 8.0 * inverseScale;
     final double strokeWidth = 1.5 * inverseScale;
     final handlePaintFill = Paint()..color = Colors.white;
@@ -682,22 +694,23 @@ class DrawingPainter extends CustomPainter {
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
-    
+
     // Draw outline rect
     canvas.drawRect(
       bounds.inflate(strokeWidth / 2),
       handlePaintStroke..color = handlePaintStroke.color.withOpacity(0.7)
     );
-    
+
     // Calculate and draw handles
     final handles = calculateHandles(bounds, handleSize);
+    // Draw only corner handles for simplicity now, can add edge handles later
     final handlesToDraw = [
       ResizeHandleType.topLeft,
       ResizeHandleType.topRight,
       ResizeHandleType.bottomLeft,
       ResizeHandleType.bottomRight,
     ];
-    
+
     for (var handleType in handlesToDraw) {
       final handleRect = handles[handleType];
       if (handleRect != null) {
@@ -708,12 +721,9 @@ class DrawingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant DrawingPainter oldDelegate) {
-    return currentTransform != oldDelegate.currentTransform ||
-           !listEquals(selectedIds, oldDelegate.selectedIds) ||
-           currentElement != oldDelegate.currentElement ||
-           !listEquals(elements, oldDelegate.elements) ||
-           excludeVideoContent != oldDelegate.excludeVideoContent ||
-           excludeGifContent != oldDelegate.excludeGifContent;
+  bool shouldRepaint(covariant SelectionPainter oldDelegate) {
+     // Repaint if element or transform changes
+     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
+
 }

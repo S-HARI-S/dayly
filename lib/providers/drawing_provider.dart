@@ -457,6 +457,10 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
         selectionChanged = true;
       }
       
+      // Log the z-index of the selected element
+      final zIndex = elements.indexOf(hitElement);
+      print("Element ${hitElement.id} selected at z-index: $zIndex");
+      
     } else {
       if (selectedElementIds.isNotEmpty) {
         clearSelection(notify: false);
@@ -751,6 +755,174 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
     undoStack.clear();
     redoStack.clear();
     super.dispose();
+  }
+
+  // --- Element Order Manipulation ---
+
+  void bringSelectedForward() {
+    if (selectedElementIds.isEmpty) return;
+
+    // Create a list of (originalIndex, element) pairs for selected items
+    List<MapEntry<int, DrawingElement>> selectedIndexed = [];
+    for (int i = 0; i < elements.length; i++) {
+      if (selectedElementIds.contains(elements[i].id)) {
+        selectedIndexed.add(MapEntry(i, elements[i]));
+      }
+    }
+
+    if (selectedIndexed.isEmpty) return;
+
+    // Sort by original index to easily find min/max and preserve relative order
+    selectedIndexed.sort((a, b) => a.key.compareTo(b.key));
+
+    int maxOriginalIndex = selectedIndexed.last.key;
+
+    // Check if already at the top
+    if (maxOriginalIndex == elements.length - 1) {
+      print("Selected elements already at the top.");
+      return;
+    }
+
+    saveToUndoStack(); // Save state *only* if a change is possible
+
+    List<DrawingElement> currentElements = List.from(elements);
+    List<DrawingElement> selectedItems = selectedIndexed.map((e) => e.value).toList();
+
+    // Remove selected items from the list (using original indices, descending)
+    for (int i = selectedIndexed.length - 1; i >= 0; i--) {
+      currentElements.removeAt(selectedIndexed[i].key);
+    }
+
+    // Determine the insertion index in the modified list.
+    // It should be inserted just *after* the element that was originally at maxOriginalIndex + 1.
+    DrawingElement elementOriginallyAbove = elements[maxOriginalIndex + 1];
+    int indexOfElementAbove = currentElements.indexOf(elementOriginallyAbove);
+
+    int insertionPoint;
+    if (indexOfElementAbove != -1) {
+      // Insert *after* the element that was originally above
+      insertionPoint = indexOfElementAbove + 1;
+    } else {
+      // Fallback: calculate based on original index and number removed before it.
+      int removedCountBeforeTarget = selectedIndexed.where((e) => e.key < maxOriginalIndex + 1).length;
+      insertionPoint = (maxOriginalIndex + 1) - removedCountBeforeTarget;
+      print("Warning/Fallback: Using calculated insertion point for bringForward: $insertionPoint");
+    }
+
+     // Clamp insertion point to valid range
+    insertionPoint = insertionPoint.clamp(0, currentElements.length);
+
+    // Insert the block
+    currentElements.insertAll(insertionPoint, selectedItems);
+
+    elements = currentElements;
+
+    // --- Add Logging Here ---
+    print("Brought selected elements forward. New order:");
+    for(int i = 0; i < elements.length; i++) {
+      print("  Index $i: ${elements[i].id} (${elements[i].type})");
+    }
+    // --- End Logging ---
+
+    notifyListeners();
+    print("Brought selected elements forward.");
+
+  }
+
+  void sendSelectedBackward() {
+    if (selectedElementIds.isEmpty) return;
+
+     // Create a list of (originalIndex, element) pairs for selected items
+    List<MapEntry<int, DrawingElement>> selectedIndexed = [];
+    for (int i = 0; i < elements.length; i++) {
+      if (selectedElementIds.contains(elements[i].id)) {
+        selectedIndexed.add(MapEntry(i, elements[i]));
+      }
+    }
+
+    if (selectedIndexed.isEmpty) return;
+
+    // Sort by original index
+    selectedIndexed.sort((a, b) => a.key.compareTo(b.key));
+
+    int minOriginalIndex = selectedIndexed.first.key;
+
+    // Check if already at the bottom
+    if (minOriginalIndex == 0) {
+      print("Selected elements already at the bottom.");
+      return;
+    }
+
+    saveToUndoStack(); // Save state only if change is possible
+
+    List<DrawingElement> currentElements = List.from(elements);
+    List<DrawingElement> selectedItems = selectedIndexed.map((e) => e.value).toList();
+
+    // Remove selected items (using original indices, descending)
+    for (int i = selectedIndexed.length - 1; i >= 0; i--) {
+      currentElements.removeAt(selectedIndexed[i].key);
+    }
+
+    // Determine the insertion index in the modified list.
+    // It should be inserted *at the position* where the element that was originally at minOriginalIndex - 1 now resides.
+    DrawingElement elementOriginallyBelow = elements[minOriginalIndex - 1];
+    int indexOfElementBelow = currentElements.indexOf(elementOriginallyBelow);
+
+    int insertionPoint;
+    if (indexOfElementBelow != -1) {
+      // Insert *at the current index* of the element that was originally below
+      insertionPoint = indexOfElementBelow;
+    } else {
+      // Fallback: calculate based on original index and number removed before it.
+       int removedCountBeforeTarget = selectedIndexed.where((e) => e.key < minOriginalIndex).length;
+       insertionPoint = minOriginalIndex - removedCountBeforeTarget;
+       print("Warning/Fallback: Using calculated insertion point for sendBackward: $insertionPoint");
+    }
+
+    // Clamp insertion point to valid range
+    insertionPoint = insertionPoint.clamp(0, currentElements.length);
+
+    // Insert the block
+    currentElements.insertAll(insertionPoint, selectedItems);
+
+    elements = currentElements;
+
+    // --- Add Logging Here ---
+    print("Sent selected elements backward. New order:");
+    for(int i = 0; i < elements.length; i++) {
+      print("  Index $i: ${elements[i].id} (${elements[i].type})");
+    }
+    // --- End Logging ---
+
+    notifyListeners();
+    print("Sent selected elements backward.");
+  }
+
+  void moveElementBackward(String elementId) {
+    print("Attempting to move element $elementId backward."); // Debugging output
+    saveToUndoStack(); // Save state before changing order
+    final index = elements.indexWhere((el) => el.id == elementId);
+    if (index > 0) { // Can only move back if not already at the bottom
+      final element = elements.removeAt(index);
+      elements.insert(index - 1, element);
+      notifyListeners();
+      print("Moved element $elementId backward to index ${index - 1}");
+      // Log the new z-index
+      print("Element $elementId new z-index: ${index - 1}");
+    } else {
+      print("Element $elementId is already at the bottom or not found.");
+    }
+  }
+
+  void deleteSelectedElements() {
+    if (selectedElementIds.isEmpty) return;
+    saveToUndoStack(); // Save state before deleting
+    elements.removeWhere((el) => selectedElementIds.contains(el.id));
+    final deletedIds = List.from(selectedElementIds); // Copy before clearing
+    selectedElementIds.clear();
+    showContextToolbar = false; // Hide toolbar after deletion
+    notifyListeners();
+    print("Deleted elements: $deletedIds");
   }
 }
 
