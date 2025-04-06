@@ -142,11 +142,6 @@ class _DrawingBoardState extends State<DrawingBoard> {
             onPressed: () => Provider.of<DrawingProvider>(context, listen: false).redo(),
             tooltip: 'Redo',
           ),
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: () => Provider.of<DrawingProvider>(context, listen: false).deleteSelected(),
-            tooltip: 'Delete Selected',
-          ),
         ],
       ),
       body: Stack(
@@ -273,30 +268,6 @@ class _DrawingBoardState extends State<DrawingBoard> {
                               .searchAndAddGif(context, _transformationController);
                           },
                           tooltip: 'Search & Add GIF',
-                        ),
-
-                        const Divider(height: 16), // Separator
-
-                        // --- Color Picker ---
-                        GestureDetector(
-                          onTap: () => _showColorPicker(context, drawingProvider),
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: drawingProvider.currentColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.grey.shade400, width: 1.5),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.withOpacity(0.5),
-                                  spreadRadius: 1,
-                                  blurRadius: 3,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                          ),
                         ),
                       ],
                     );

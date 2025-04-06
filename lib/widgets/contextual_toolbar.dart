@@ -356,14 +356,18 @@ class ContextualToolbar extends StatelessWidget {
 
         // Build the actual toolbar widget
         return BottomAppBar(
-          child: Padding(
-             padding: const EdgeInsets.symmetric(horizontal: 8.0),
-             child: Wrap(
-               alignment: WrapAlignment.spaceEvenly,
-               spacing: 4.0, // Adjust spacing between buttons
-               runSpacing: 4.0,
-               children: actions,
-             ),
+          // Wrap the content in a SingleChildScrollView for horizontal scrolling
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Padding(
+               padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0), // Added vertical padding
+               child: Wrap(
+                 alignment: WrapAlignment.start, // Align items to the start
+                 spacing: 8.0, // Increased spacing between buttons
+                 runSpacing: 4.0, // Keep run spacing if needed, though less likely with horizontal scroll
+                 children: actions,
+               ),
+            ),
           )
         );
       },
@@ -385,4 +389,4 @@ class ContextualToolbar extends StatelessWidget {
         return Icons.format_align_justify;
     }
   }
-} 
+}
