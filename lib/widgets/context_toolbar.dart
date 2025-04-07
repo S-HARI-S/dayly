@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:collection/collection.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../providers/drawing_provider.dart';
 import '../models/element.dart';
 import '../models/image_element.dart';
+import '../models/pen_element.dart';
+import '../models/text_element.dart';
+import '../models/video_element.dart';
+import '../models/gif_element.dart';
+import '../models/note_element.dart';
 import '../services/background_removal_service.dart';
 import 'dart:math' as math;
 
 class ContextToolbar extends StatefulWidget {
   final double height;
   final bool isVisible;
-  final Function(double)? onHeightChanged;  // Add callback for height changes
+  final Function(double)? onHeightChanged;
 
   const ContextToolbar({
-    Key? key,
+    super.key,
     this.height = 80.0,
     required this.isVisible,
     this.onHeightChanged,
-  }) : super(key: key);
+  });
 
   @override
   State<ContextToolbar> createState() => _ContextToolbarState();
@@ -34,7 +40,7 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 250), // Slightly faster animation
+      duration: const Duration(milliseconds: 400), // Increase duration for smoother animation
     );
     
     // Initialize slide animation
@@ -43,7 +49,7 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeOutCubic, // Smoother curve
+      curve: Curves.easeInOut, // Use a smoother curve
     ));
     
     // Initialize height animation
@@ -52,7 +58,7 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
       end: widget.height,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeOutCubic,
+      curve: Curves.easeInOut, // Use a smoother curve
     ));
 
     // Initialize animation state based on visibility
@@ -88,7 +94,7 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
         end: widget.height,
       ).animate(CurvedAnimation(
         parent: _animationController,
-        curve: Curves.easeOutCubic,
+        curve: Curves.easeInOut,
       ));
     }
     
@@ -141,17 +147,11 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
                       final selectedIds = provider.selectedElementIds;
                       
                       if (selectedIds.isEmpty) {
-                        // print("No selected elements for toolbar"); // Already prints in provider setter
-                        return const SizedBox.shrink(); // Don't build if no selection
+                        return const SizedBox.shrink();
                       }
                       
                       // Toolbar should only show for single selection
                       if (selectedIds.length != 1) {
-                         print("Toolbar only supports single selection for now.");
-                         // Optionally hide the toolbar immediately if multiple are selected
-                         // WidgetsBinding.instance.addPostFrameCallback((_) {
-                         //   provider.showContextToolbar = false; 
-                         // });
                          return const SizedBox.shrink(); 
                       }
                       
@@ -161,18 +161,13 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
                         final selectedElement = provider.elements.firstWhere(
                           (element) => element.id == selectedElementId,
                           orElse: () {
-                            print("Selected element $selectedElementId not found in elements list for toolbar");
-                            // Hide toolbar if element disappears
-                             WidgetsBinding.instance.addPostFrameCallback((_) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
                                provider.showContextToolbar = false; 
                              });
                             return throw Exception("Selected element not found");
                           },
                         );
                         
-                        // print("Building tools for element type: ${selectedElement.type}");
-                        
-                        // Show specific tools based on element type
                         List<Widget> tools;
                         switch (selectedElement.type) {
                           case ElementType.image:
@@ -187,19 +182,22 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
                           case ElementType.text:
                             tools = _buildTextTools(context, provider, selectedElementId);
                             break;
-                          default: // Pen etc.
+                          case ElementType.note:
+                            tools = _buildNoteTools(context, provider, selectedElementId);
+                            break;
+                          default: 
                             tools = _buildDefaultTools(context, provider, selectedElementId);
                             break;
                         }
-                        // Use ListView for horizontal scrolling if too many items
+
+                        // Use ListView for horizontal scrolling
                         return ListView( 
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0), // Add some padding
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
                           children: tools,
                         );
 
                       } catch (e) {
-                        print("Error building toolbar content: $e");
                         return Center(
                           child: Text("Error: ${e.toString()}", 
                             style: const TextStyle(color: Colors.red, fontSize: 10),
@@ -221,46 +219,30 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
   
   // Helper to build common buttons
   List<Widget> _buildCommonTools(BuildContext context, DrawingProvider provider, String elementId) {
-    // Note: elementId is less relevant here as the provider methods operate on selectedElementIds
     return [
       _buildToolButton(
         context: context,
-        icon: Icons.flip_to_front_outlined, // Icon for bring forward
-        label: 'Bring Fwd',
+        icon: Icons.flip_to_front,
+        label: 'Forward',
         onPressed: () {
-          provider.bringSelectedForward(); // Call provider method
+          provider.bringSelectedForward();
         },
       ),
       _buildToolButton(
         context: context,
-        icon: Icons.flip_to_back_outlined, // Icon for send backward
-        label: 'Send Back',
+        icon: Icons.flip_to_back,
+        label: 'Back',
         onPressed: () {
-          provider.sendSelectedBackward(); // Call provider method
-        },
-      ),
-      _buildToolButton(
-        context: context,
-        icon: Icons.rotate_90_degrees_ccw, // Add rotation button
-        label: 'Rotate',
-        onPressed: () {
-          // Rotate the selected element by 90 degrees (π/2 radians)
-          final element = provider.elements.firstWhereOrNull((e) => e.id == elementId);
-          if (element != null) {
-            // Add π/2 to current rotation (90 degrees clockwise)
-            final newRotation = element.rotation + math.pi/2;
-            provider.rotateSelected(element.id, newRotation);
-            provider.endPotentialRotation();
-          }
+          provider.sendSelectedBackward();
         },
       ),
       _buildToolButton(
         context: context,
         icon: Icons.delete_outline,
         label: 'Delete',
-        color: Colors.redAccent, // Make delete stand out
+        color: Colors.redAccent.withOpacity(0.1),
         onPressed: () {
-          provider.deleteSelected(); // Use the method that deletes all selected
+          provider.deleteSelected();
         },
       ),
     ];
@@ -273,7 +255,6 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
         icon: Icons.auto_fix_high,
         label: 'Enhance',
         onPressed: () {
-          // Show image enhancement dialog instead of just a message
           _showImageEnhancementDialog(context, provider, element);
         },
       ),
@@ -319,22 +300,11 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
           }
         },
       ),
-      _buildToolButton(
-        context: context,
-        icon: Icons.filter,
-        label: 'Filters',
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Filter feature coming soon!')),
-          );
-        },
-      ),
       // Add common tools
       ..._buildCommonTools(context, provider, element.id),
     ];
   }
   
-  // New method to show image enhancement dialog
   void _showImageEnhancementDialog(BuildContext context, DrawingProvider provider, ImageElement element) {
     double brightness = 0.0; // Range: -1.0 to 1.0
     double contrast = 0.0;   // Range: -1.0 to 1.0
@@ -387,11 +357,9 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
                 TextButton(
                   child: const Text('Apply'),
                   onPressed: () {
-                    // Call provider method to apply enhancements
                     provider.applyImageEnhancements(element.id, brightness, contrast);
                     Navigator.of(context).pop();
                     
-                    // Show confirmation message
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Image enhancements applied')),
                     );
@@ -406,12 +374,11 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
   }
 
   List<Widget> _buildVideoTools(BuildContext context, DrawingProvider provider, String elementId) {
-    // Example: Add common tools here too if needed
     return [
       _buildToolButton(
           context: context,
-          icon: Icons.play_arrow, // Placeholder
-          label: 'Play/Pause',
+          icon: Icons.play_arrow,
+          label: 'Play',
           onPressed: () => provider.toggleVideoPlayback(elementId),
        ),
       // Add common tools
@@ -420,30 +387,380 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
   }
 
   List<Widget> _buildGifTools(BuildContext context, DrawingProvider provider, String elementId) {
-    // Add common tools
     return _buildCommonTools(context, provider, elementId);
   }
 
   List<Widget> _buildTextTools(BuildContext context, DrawingProvider provider, String elementId) {
-    // Example: Add common tools here too if needed
     return [
       _buildToolButton(
           context: context,
-          icon: Icons.edit, // Placeholder
-          label: 'Edit Text',
+          icon: Icons.edit,
+          label: 'Edit',
           onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Edit text feature coming soon!')),
+            final textElement = provider.elements.firstWhereOrNull(
+              (e) => e.id == elementId && e.type == ElementType.text
+            );
+            if (textElement != null) {
+              final controller = TextEditingController(text: (textElement as TextElement).text);
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Edit Text'),
+                  content: TextField(
+                    controller: controller,
+                    decoration: const InputDecoration(hintText: 'Enter text'),
+                    maxLines: null,
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('CANCEL'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        provider.updateSelectedElementProperties({'text': controller.text});
+                        Navigator.pop(context);
+                      },
+                      child: const Text('SAVE'),
+                    ),
+                  ],
+                ),
               );
-          }
-       ),
+            }
+          },
+      ),
+      _buildToolButton(
+          context: context,
+          icon: Icons.palette,
+          label: 'Color',
+          onPressed: () {
+            final textElement = provider.elements.firstWhereOrNull(
+              (e) => e.id == elementId && e.type == ElementType.text
+            );
+            if (textElement != null) {
+              _showColorPickerDialog(context, provider);
+            }
+          },
+      ),
+      _buildToolButton(
+          context: context,
+          icon: Icons.format_size,
+          label: 'Size',
+          onPressed: () {
+            final textElement = provider.elements.firstWhereOrNull(
+              (e) => e.id == elementId && e.type == ElementType.text
+            ) as TextElement?;
+            if (textElement != null) {
+              double currentSize = textElement.fontSize;
+              showDialog(
+                context: context,
+                builder: (BuildContext context) {
+                  double tempSize = currentSize;
+                  return AlertDialog(
+                    title: const Text('Font Size'),
+                    content: StatefulBuilder(
+                      builder: (context, setState) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${tempSize.round()}', style: TextStyle(fontSize: 24)),
+                            Slider(
+                              value: tempSize,
+                              min: 8.0,
+                              max: 72.0,
+                              divisions: 64,
+                              onChanged: (value) {
+                                setState(() {
+                                  tempSize = value;
+                                });
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('CANCEL'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          provider.updateSelectedElementProperties({'fontSize': tempSize});
+                          Navigator.pop(context);
+                        },
+                        child: const Text('APPLY'),
+                      ),
+                    ],
+                  );
+                },
+              );
+            }
+          },
+      ),
       // Add common tools
       ..._buildCommonTools(context, provider, elementId),
     ];
   }
 
+  // Show color picker dialog
+  void _showColorPickerDialog(BuildContext context, DrawingProvider provider) {
+    Color pickerColor = provider.currentColor;
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Color'),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: pickerColor,
+              onColorChanged: (color) {
+                pickerColor = color;
+              },
+              colorPickerWidth: 300,
+              pickerAreaHeightPercent: 0.7,
+              enableAlpha: true,
+              displayThumbColor: true,
+              paletteType: PaletteType.hsv,
+              labelTypes: const [ColorLabelType.hsl, ColorLabelType.rgb, ColorLabelType.hex],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('CANCEL'),
+            ),
+            TextButton(
+              onPressed: () {
+                provider.setColor(pickerColor);
+                Navigator.of(context).pop();
+              },
+              child: const Text('SELECT'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildNoteTools(BuildContext context, DrawingProvider provider, String elementId) {
+    final noteElement = provider.elements.firstWhereOrNull((e) => e.id == elementId) as NoteElement?;
+    if (noteElement == null) return _buildCommonTools(context, provider, elementId);
+    
+    return [
+      _buildToolButton(
+          context: context,
+          icon: Icons.edit,
+          label: 'Edit',
+          onPressed: () {
+            _showNoteEditDialog(context, provider, noteElement);
+          }
+      ),
+      _buildToolButton(
+          context: context,
+          icon: Icons.palette,
+          label: 'Color',
+          onPressed: () {
+            _showNoteColorPicker(context, provider, noteElement);
+          }
+      ),
+      _buildToolButton(
+          context: context,
+          icon: noteElement.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+          label: noteElement.isPinned ? 'Unpin' : 'Pin',
+          onPressed: () {
+            provider.toggleNotePin(elementId);
+          }
+      ),
+      // Add common tools
+      ..._buildCommonTools(context, provider, elementId),
+    ];
+  }
+
+  // Add a method to show note edit dialog
+  void _showNoteEditDialog(BuildContext context, DrawingProvider provider, NoteElement note) {
+    final titleController = TextEditingController(text: note.title);
+    final contentController = TextEditingController(text: note.content);
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Note'),
+          content: SizedBox(
+            width: 300,
+            height: 250, // Set a reasonable height
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    hintText: 'Note title'
+                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: TextField(
+                    controller: contentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Content',
+                      hintText: 'Note content'
+                    ),
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                provider.updateNoteContent(note.id, titleController.text, contentController.text);
+                Navigator.of(context).pop();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showNoteColorPicker(BuildContext context, DrawingProvider provider, NoteElement note) {
+    // Predefined colors for notes
+    final noteColors = [
+      Colors.white,
+      Colors.yellow.shade100,
+      Colors.green.shade100,
+      Colors.blue.shade100,
+      Colors.purple.shade100,
+      Colors.pink.shade100,
+      Colors.orange.shade100,
+    ];
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Choose Note Color'),
+          content: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: noteColors.map((color) {
+              return GestureDetector(
+                onTap: () {
+                  provider.setNoteColor(note.id, color);
+                  Navigator.of(context).pop();
+                },
+                child: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: color,
+                    border: Border.all(
+                      color: note.backgroundColor == color 
+                          ? Theme.of(context).primaryColor 
+                          : Colors.grey,
+                      width: note.backgroundColor == color ? 2 : 1,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   List<Widget> _buildDefaultTools(BuildContext context, DrawingProvider provider, String elementId) {
-    // Just the common tools for Pen, etc.
+    // For pen elements, add color picker
+    final penElement = provider.elements.firstWhereOrNull(
+      (e) => e.id == elementId && e.type == ElementType.pen
+    ) as PenElement?;
+    
+    if (penElement != null) {
+      return [
+        _buildToolButton(
+          context: context,
+          icon: Icons.palette,
+          label: 'Color',
+          onPressed: () => _showColorPickerDialog(context, provider),
+        ),
+        _buildToolButton(
+          context: context,
+          icon: Icons.line_weight,
+          label: 'Width',
+          onPressed: () {
+            double currentWidth = penElement.strokeWidth;
+            showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                double tempWidth = currentWidth;
+                return AlertDialog(
+                  title: const Text('Stroke Width'),
+                  content: StatefulBuilder(
+                    builder: (context, setState) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('${tempWidth.round()}px', style: TextStyle(fontSize: 24)),
+                          Slider(
+                            value: tempWidth,
+                            min: 1.0,
+                            max: 30.0,
+                            divisions: 29,
+                            onChanged: (value) {
+                              setState(() {
+                                tempWidth = value;
+                              });
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('CANCEL'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        provider.updateSelectedElementProperties({'strokeWidth': tempWidth});
+                        Navigator.pop(context);
+                      },
+                      child: const Text('APPLY'),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+        ..._buildCommonTools(context, provider, elementId),
+      ];
+    }
+    
+    // Just the common tools for other elements
     return _buildCommonTools(context, provider, elementId);
   }
 
@@ -456,31 +773,43 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
     Color? color,
     bool isLoading = false,
   }) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        ElevatedButton(
-          onPressed: onPressed,
-          style: ElevatedButton.styleFrom(
-            shape: const CircleBorder(),
-            padding: const EdgeInsets.all(12),
-            backgroundColor: color ?? Theme.of(context).primaryColor.withOpacity(0.1),
-            foregroundColor: Theme.of(context).primaryColor,
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 6.0),
+      width: 70,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ElevatedButton(
+            onPressed: onPressed,
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(45, 45),
+              shape: const CircleBorder(),
+              padding: const EdgeInsets.all(10),
+              backgroundColor: color ?? Theme.of(context).colorScheme.surfaceVariant,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              elevation: 1,
+            ),
+            child: isLoading 
+                ? const SizedBox(
+                    width: 20, 
+                    height: 20, 
+                    child: CircularProgressIndicator(strokeWidth: 2)
+                  )
+                : Icon(icon, size: 20),
           ),
-          child: isLoading 
-              ? const SizedBox(
-                  width: 24, 
-                  height: 24, 
-                  child: CircularProgressIndicator(strokeWidth: 2)
-                )
-              : Icon(icon, size: 24),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12),
-        ),
-      ],
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }

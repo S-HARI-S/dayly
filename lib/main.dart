@@ -9,12 +9,22 @@ import 'widgets/drawing_canvas.dart';
 import 'screens/calendar_screen.dart';
 import 'models/element.dart';
 import 'models/calendar_entry.dart';
-import 'widgets/contextual_toolbar.dart'; // Import the toolbar
+import 'widgets/context_toolbar.dart'; // Update to match the actual file name
 
 // Load environment variables before running the app
 Future<void> main() async {
-  // Load .env file
-  await dotenv.load();
+  WidgetsFlutterBinding.ensureInitialized(); // Add this line to ensure Flutter is initialized
+  
+  try {
+    await dotenv.load(fileName: ".env"); // Specify the file name if needed
+    print("Environment variables loaded successfully");
+  } catch (e) {
+    print("Warning: Error loading .env file: $e");
+    // Create a default .env if it doesn't exist
+    // This allows the app to run without the .env file during development
+    dotenv.env['GIPHY_API_KEY'] = 'your_api_key_here'; // Use a placeholder
+    print("Using default environment variables");
+  }
   
   runApp(
     MultiProvider(
@@ -73,7 +83,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
   // Helper method to center the canvas
   void _centerCanvas() {
     // Get the canvas center coordinates (half of our large canvas size)
-    final canvasCenter = const Offset(50000, 50000);
+    const canvasCenter = Offset(50000, 50000);
     
     // Get the screen size to determine where the viewport center is
     final Size screenSize = MediaQuery.of(context).size;
@@ -270,6 +280,33 @@ class _DrawingBoardState extends State<DrawingBoard> {
                           },
                           tooltip: 'Search & Add GIF',
                         ),
+                        // Add a dedicated button for Sticky Notes in the main toolbar
+                        ToolButton(
+                          icon: Icons.sticky_note_2,
+                          isSelected: false,
+                          onPressed: () {
+                            _isNewCanvas = false; // Mark as edited
+                            _isSaved = false; // Mark as unsaved
+                            // Get the canvas center position
+                            final Size screenSize = MediaQuery.of(context).size;
+                            final Offset screenCenter = Offset(screenSize.width / 2, screenSize.height / 2);
+                            try {
+                              final Matrix4 inverseMatrix = Matrix4.inverted(_transformationController.value);
+                              final canvasPosition = MatrixUtils.transformPoint(inverseMatrix, screenCenter);
+                              // Create sticky note at the canvas center
+                              Provider.of<DrawingProvider>(context, listen: false)
+                                .createStickyNote(canvasPosition);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Sticky note created!'))
+                              );
+                            } catch (e) {
+                              // Fallback if matrix inversion fails
+                              Provider.of<DrawingProvider>(context, listen: false)
+                                .createStickyNote(const Offset(50000, 50000));
+                            }
+                          },
+                          tooltip: 'Add Sticky Note',
+                        ),
                       ],
                     );
                   },
@@ -340,7 +377,18 @@ class _DrawingBoardState extends State<DrawingBoard> {
         ],
       ),
       // Add the toolbar to the main drawing screen
-      bottomNavigationBar: const ContextualToolbar(),
+      // Show toolbar only if an element is selected
+      bottomNavigationBar: Consumer<DrawingProvider>(
+        builder: (context, provider, _) {
+          return ContextToolbar(
+            height: 80.0, 
+            isVisible: provider.showContextToolbar,
+            onHeightChanged: (height) {
+              // Optional: can add UI adjustments when toolbar height changes
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -391,8 +439,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
     // If there are changes in the current canvas, ask to save first
     if (!_isNewCanvas && drawingProvider.elements.isNotEmpty && !_isSaved) {
       // Prompt to save
-      final shouldSave = await showDialog<bool>(
-        context: context,
+      final shouldSave = await showDialog<bool>(        context: context,
         builder: (context) => AlertDialog(
           title: const Text('Save Current Canvas?'),
           content: const Text('Do you want to save your current canvas before creating a new one?'),
@@ -472,7 +519,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
             onPressed: () async {
               final title = titleController.text;
 
-              if (isRename && currentEntry != null) {
+              if (isRename) {
                 // Update existing entry with new title
                 await calendarProvider.updateEntry(
                   currentEntry.id, 
@@ -555,13 +602,11 @@ class _DrawingBoardState extends State<DrawingBoard> {
       }
     }
     
-    if (entry != null) {
-      // No longer a new canvas
-      setState(() {
-        _isNewCanvas = false;
-        _isSaved = true; // Mark as saved
-      });
-    }
+    // No longer a new canvas
+    setState(() {
+      _isNewCanvas = false;
+      _isSaved = true; // Mark as saved
+    });
   }
 
   // Helper method for Color Picker Dialog
@@ -609,7 +654,7 @@ class ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double buttonSize = 44.0; // Increased button size for better touch target
+    const double buttonSize = 44.0; // Increased button size for better touch target
     
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),

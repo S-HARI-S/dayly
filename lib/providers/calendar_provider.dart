@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -249,13 +248,14 @@ class CalendarProvider extends ChangeNotifier {
       final thumbnailDir = Directory('${directory.path}/thumbnails');
       await thumbnailDir.create(recursive: true);
       
-      final fileName = '${const Uuid().v4()}.png';
-      final file = File('${thumbnailDir.path}/$fileName');
+      // Generate a unique filename for the thumbnail
+      final filename = '${const Uuid().v4()}.png';
+      final file = File('${thumbnailDir.path}/$filename');
       await file.writeAsBytes(buffer);
       
       return file.path;
-    } catch (e) {
-      print('Error generating thumbnail: $e');
+    } catch (e, s) {
+      print('Error generating thumbnail: $e\n$s');
       return null;
     }
   }

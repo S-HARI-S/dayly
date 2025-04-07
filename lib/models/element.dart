@@ -1,6 +1,6 @@
 // lib/models/element.dart
 import 'package:flutter/material.dart';
-import 'dart:ui' as ui; // For Canvas
+// For Canvas
 
 // Enum defining the types of elements that can be drawn or interacted with
 enum ElementType {
@@ -13,6 +13,7 @@ enum ElementType {
   image,
   video,
   gif,  // Added GIF type
+  note,  // Added note type
   group // Placeholder
 }
 
@@ -36,10 +37,40 @@ abstract class DrawingElement {
   // Determines if a given point (in canvas coordinates) is contained within the element
   bool containsPoint(Offset point);
 
-  // Abstract method for subclasses to implement rendering logic
+  // Abstract method for subclasses to implement rendering logic with rotation
   // Draws the element onto the provided canvas
   // `inverseScale` can be used to draw elements (like strokes) with a consistent screen size
-  void render(Canvas canvas, {double inverseScale = 1.0});
+  void render(Canvas canvas, {double inverseScale = 1.0}) {
+    // Subclasses should override this to apply rotation if needed
+  }
+
+  // Helper method subclasses can use to apply rotation around element center
+  void applyRotation(Canvas canvas, Rect bounds, void Function() drawFunction) {
+    if (rotation == 0.0) {
+      // No rotation needed, just draw normally
+      drawFunction();
+      return;
+    }
+
+    // Save the current canvas state
+    canvas.save();
+    
+    // Translate to the center of the element for rotation around center
+    final center = bounds.center;
+    canvas.translate(center.dx, center.dy);
+    
+    // Apply rotation 
+    canvas.rotate(rotation);
+    
+    // Translate back to draw at the correct position
+    canvas.translate(-center.dx, -center.dy);
+    
+    // Draw the element
+    drawFunction();
+    
+    // Restore the canvas state
+    canvas.restore();
+  }
 
   // Abstract method for creating a modified copy of the element.
   // Subclasses must implement this to support immutable updates.

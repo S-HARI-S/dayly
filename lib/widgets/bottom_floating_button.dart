@@ -22,20 +22,20 @@ class BottomFloatingButton extends StatelessWidget {
   final String? tooltip;
 
   const BottomFloatingButton({
-    Key? key,
+    super.key,
     required this.bottomOffset,
     required this.onPressed,
     required this.child,
     this.size,
     this.heroTag,
     this.tooltip,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     // Calculate safe area (handle notches, rounded corners, etc.)
     final EdgeInsets safeArea = MediaQuery.of(context).padding;
-    final double defaultBottomPadding = 16.0;
+    const double defaultBottomPadding = 16.0;
     final double safePadding = safeArea.bottom > 0 ? safeArea.bottom : defaultBottomPadding;
     
     return AnimatedPositioned(

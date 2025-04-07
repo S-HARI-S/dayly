@@ -7,7 +7,9 @@ import '../models/element.dart';
 import '../models/image_element.dart';
 import '../models/text_element.dart';
 import '../models/pen_element.dart'; // Import PenElement
-// Import other element types as needed
+import '../models/note_element.dart';
+import '../models/video_element.dart';
+import '../models/gif_element.dart';
 
 class ContextualToolbar extends StatelessWidget {
   const ContextualToolbar({super.key});
@@ -307,8 +309,9 @@ class ContextualToolbar extends StatelessWidget {
                    tooltip: 'Align Text',
                    onPressed: () {
                       TextAlign nextAlign;
-                      if (textElement.textAlign == TextAlign.left) nextAlign = TextAlign.center;
-                      else if (textElement.textAlign == TextAlign.center) nextAlign = TextAlign.right;
+                      if (textElement.textAlign == TextAlign.left) {
+                        nextAlign = TextAlign.center;
+                      } else if (textElement.textAlign == TextAlign.center) nextAlign = TextAlign.right;
                       else nextAlign = TextAlign.left;
                       drawingProvider.updateSelectedElementProperties({'textAlign': nextAlign});
                    },

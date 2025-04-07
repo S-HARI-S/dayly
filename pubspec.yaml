@@ -23,7 +23,7 @@ dependencies:
   # --- Media ---
   image_picker: ^1.1.2 # Latest stable version
   video_player: ^2.8.7 # Latest stable version
-  giphy_picker: ^3.0.1 # For GIF search and selection
+  giphy_picker: ^3.0.0 # Add this for GIF support
   http: ^1.2.0 # For HTTP requests (downloading GIF previews)
 
   # --- Utilities ---

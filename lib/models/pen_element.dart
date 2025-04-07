@@ -10,14 +10,14 @@ class PenElement extends DrawingElement {
   final double strokeWidth;
 
   PenElement({
-    String? id,
-    required Offset position, // Note: position might be redundant if bounds are calculated from points
-    bool isSelected = false,
+    super.id,
+    required super.position, // Note: position might be redundant if bounds are calculated from points
+    super.isSelected,
     required this.points,
     required this.color,
     required this.strokeWidth,
-    double rotation = 0.0, // Add rotation parameter
-  }) : super(id: id, type: ElementType.pen, position: position, isSelected: isSelected, rotation: rotation);
+    super.rotation, // Add rotation parameter
+  }) : super(type: ElementType.pen);
 
   // --- DrawingElement Overrides ---
 
@@ -56,12 +56,14 @@ class PenElement extends DrawingElement {
       ..strokeCap = StrokeCap.round // Smoother line joins
       ..strokeJoin = StrokeJoin.round;
 
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (int i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
-    }
+    applyRotation(canvas, bounds, () {
+      final path = Path()..moveTo(points.first.dx, points.first.dy);
+      for (int i = 1; i < points.length; i++) {
+        path.lineTo(points[i].dx, points[i].dy);
+      }
 
-    canvas.drawPath(path, paint);
+      canvas.drawPath(path, paint);
+    });
 
     // Optional: Draw selection highlight if selected (using bounds)
     // if (isSelected) {

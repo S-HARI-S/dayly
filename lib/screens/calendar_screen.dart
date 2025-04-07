@@ -154,9 +154,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
         onPressed: () => _createNewCanvas(context),
         tooltip: 'Create New Canvas',
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -260,7 +260,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
             
           // Action buttons
-          ButtonBar(
+          OverflowBar(
             alignment: MainAxisAlignment.end,
             children: [
               // Edit title button

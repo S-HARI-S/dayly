@@ -14,15 +14,15 @@ class VideoElement extends DrawingElement {
   final ValueNotifier<bool> _showPlayIconNotifier;
 
   VideoElement({
-    String? id,
-    required Offset position,
-    bool isSelected = false,
+    super.id,
+    required super.position,
+    super.isSelected,
     required this.videoUrl,
     required this.controller,
     required this.size,
-    double rotation = 0.0, // Add rotation parameter
+    super.rotation, // Add rotation parameter
   }) : _showPlayIconNotifier = ValueNotifier(!controller.value.isPlaying),
-       super(id: id, type: ElementType.video, position: position, isSelected: isSelected, rotation: rotation) {
+       super(type: ElementType.video) {
     controller.addListener(_onVideoStateChanged);
     _onVideoStateChanged(); // Update initial state
   }
@@ -48,7 +48,7 @@ class VideoElement extends DrawingElement {
   }
 
   void dispose() {
-     print("Disposing VideoElement ${id}");
+     print("Disposing VideoElement $id");
      controller.removeListener(_onVideoStateChanged);
      controller.dispose();
      _showPlayIconNotifier.dispose();

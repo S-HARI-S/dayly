@@ -10,14 +10,14 @@ class ImageElement extends DrawingElement {
   final String? imagePath; // Path to the image file for serialization
 
   ImageElement({
-    String? id,
-    required Offset position,
-    bool isSelected = false,
+    super.id,
+    required super.position,
+    super.isSelected,
     required this.image,
     required this.size,
     this.imagePath,
-    double rotation = 0.0, // Add rotation parameter
-  }) : super(id: id, type: ElementType.image, position: position, isSelected: isSelected, rotation: rotation);
+    super.rotation, // Add rotation parameter
+  }) : super(type: ElementType.image);
 
   // --- DrawingElement Overrides ---
 
@@ -34,8 +34,11 @@ class ImageElement extends DrawingElement {
     // Define the destination rectangle (position and size on canvas)
     final dstRect = bounds;
 
-    // Draw the image scaled/positioned into the destination rect
-    canvas.drawImageRect(image, srcRect, dstRect, Paint());
+    // Apply rotation around the center of the image
+    applyRotation(canvas, bounds, () {
+      // Draw the image scaled/positioned into the destination rect
+      canvas.drawImageRect(image, srcRect, dstRect, Paint());
+    });
 
     // Optional: Draw selection highlight
     // if (isSelected) {

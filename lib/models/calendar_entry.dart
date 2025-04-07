@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter/material.dart';
 import 'element.dart';
 import 'pen_element.dart';
 import 'text_element.dart';

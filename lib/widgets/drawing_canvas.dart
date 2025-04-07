@@ -16,16 +16,17 @@ import '../models/gif_element.dart';
 import '../models/handles.dart';
 import '../widgets/context_toolbar.dart';
 import '../widgets/bottom_floating_button.dart';
+import '../models/note_element.dart'; // Add missing import for NoteElement
 
 class DrawingCanvas extends StatefulWidget {
   final TransformationController transformationController;
   final bool isInteracting;
-
+  
   const DrawingCanvas({
-    super.key,
+    Key? key,
     required this.transformationController,
-    required this.isInteracting,
-  });
+    this.isInteracting = false,
+  }) : super(key: key);
 
   @override
   State<DrawingCanvas> createState() => _DrawingCanvasState();
@@ -50,6 +51,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   // Initial angle for rotation tracking
   double? _startRotationAngle;
+
+  // Track last tap time for double-tap detection
+  DateTime? _lastTapTime;
   
   // Helper method to get transformed canvas position
   Offset _getTransformedCanvasPosition(Offset globalPosition) {
@@ -189,6 +193,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     );
                     if (hitElement != null) {
                       // Always show toolbar when element is hit
+                      drawingProvider.showContextToolbar = true;
                       drawingProvider.showContextToolbarForElement(hitElement.id);
                       
                       // Now handle selection
@@ -235,8 +240,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 if (!mounted || _activePointers != 1 || widget.isInteracting) return;
                 final Offset localPosition = event.localPosition;
                 
-                if (_lastInteractionPosition != null && 
-                    (localPosition - _lastInteractionPosition!).distanceSquared < 0.1) return;
+                // Remove this check to ensure we process ALL movement events
+                // This was causing the jankiness by skipping updates when pointer barely moved
                 
                 final delta = (_lastInteractionPosition != null) 
                     ? localPosition - _lastInteractionPosition! 
@@ -250,9 +255,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     final currentAngle = _calculateAngle(elementCenter, localPosition);
                     final newRotation = currentAngle - _startRotationAngle!;
                     
-                    drawingProvider.rotateSelected(_elementBeingInteractedWith!.id, newRotation);
+                    // IMPORTANT: Use direct update instead of Future.microtask
+                    // Use rotateSelectedImmediate instead of rotateSelected for immediate visual feedback
+                    // This ensures bounding box and element rotation stay in sync
+                    drawingProvider.rotateSelectedImmediate(_elementBeingInteractedWith!.id, newRotation);
                   }
-                  // Handle resizing
+                  // Handle other interactions (resizing, moving)
                   else if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
                     drawingProvider.resizeSelected(
                       _elementBeingInteractedWith!.id, 
@@ -269,11 +277,23 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       if ((localPosition - _potentialInteractionStartPosition!).distance > moveCancelThreshold) { 
                         print("Move cancelled before timer fired."); 
                         _cancelMoveTimer(); 
+                        
+                        // IMMEDIATE ENABLE MOVE! Don't wait for the timer (faster response)
+                        setState(() { 
+                          _isMovingElement = true; 
+                        });
+                        HapticFeedback.lightImpact();
                       }
                     }
                     // Only move if the timer has fired (_isMovingElement is true)
-                    if (_isMovingElement) { 
-                      drawingProvider.moveSelected(delta);
+                    if (_isMovingElement) {
+                      // IMPORTANT: Use microtask to ensure move happens on next frame
+                      // This helps avoid the UI thread being blocked during drag operations
+                      Future.microtask(() {
+                        if (mounted) {
+                          drawingProvider.moveSelected(delta);
+                        }
+                      });
                     }
                   }
                 } else if (currentTool == ElementType.pen) {
@@ -322,10 +342,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     // Check if it was a tap on an element (not a drag or resize)
                     else if (interactedElement != null) {
                       print("Tap on element: ${interactedElement.id}");
-                      // If the tapped element was already selected, consider it a tap action (e.g., toggle video)
+                      // If the tapped element was already selected, consider it a tap action
                       if (selectedIds.contains(interactedElement.id)) {
                          if (interactedElement is VideoElement) {
                             drawingProvider.toggleVideoPlayback(interactedElement.id);
+                         } else if (interactedElement is NoteElement) {
+                            // Check for double-tap by measuring time since last tap
+                            final now = DateTime.now();
+                            if (_lastTapTime != null && 
+                                now.difference(_lastTapTime!).inMilliseconds < 500) {
+                              // Show edit dialog on double tap
+                              _showNoteEditDialog(context, drawingProvider, interactedElement);
+                            }
+                            _lastTapTime = now;
                          }
                          // Add other tap actions for other element types if needed
                       }
@@ -344,41 +373,40 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               },
 
               onPointerCancel: (PointerCancelEvent event) {
-                 if (!mounted) return; 
-                 print("Pointer Cancelled");
-                 _cancelMoveTimer(); 
-                 bool wasMoving = _isMovingElement;
-                 bool wasResizing = _isResizingElement;
-                 bool wasRotating = _isRotatingElement; // Track rotation state
-                 
-                 // Decide how to handle cancel: discard or finalize based on state
-                 if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
-                    drawingProvider.discardDrawing();
-                 }
-                 else if (wasResizing) { 
-                    drawingProvider.endPotentialResize();
-                 }
-                 else if (wasMoving) { 
-                    drawingProvider.endPotentialMove();
-                 }
-                 else if (wasRotating) { 
-                    drawingProvider.endPotentialRotation();
-                 }
-                 
-                 // Reset state regardless
-                 setState(() { 
-                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
-                   _isMovingElement = false; 
-                   _isResizingElement = false; 
-                   _isRotatingElement = false; // Reset rotation flag
-                   _draggedHandle = null; 
-                   _elementBeingInteractedWith = null; 
-                   _startRotationAngle = null; // Reset rotation angle
-                 });
-                 _lastInteractionPosition = null;
-                 _potentialInteractionStartPosition = null;
-               },
-
+                if (!mounted) return;
+                print("Pointer Cancelled");
+                _cancelMoveTimer(); 
+                bool wasMoving = _isMovingElement;
+                bool wasResizing = _isResizingElement;
+                bool wasRotating = _isRotatingElement; // Track rotation state
+                
+                // Decide how to handle cancel: discard or finalize based on state
+                if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
+                  drawingProvider.discardDrawing();
+                }
+                else if (wasResizing) { 
+                  drawingProvider.endPotentialResize(); 
+                }
+                else if (wasMoving) { 
+                  drawingProvider.endPotentialMove(); 
+                }
+                else if (wasRotating) { 
+                  drawingProvider.endPotentialRotation();
+                }
+                
+                // Reset state regardless
+                setState(() { 
+                  _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
+                  _isMovingElement = false; 
+                  _isResizingElement = false; 
+                  _isRotatingElement = false; // Reset rotation flag
+                  _draggedHandle = null; 
+                  _elementBeingInteractedWith = null; 
+                  _startRotationAngle = null; // Reset rotation angle
+                });
+                _lastInteractionPosition = null;
+                _potentialInteractionStartPosition = null;
+              },
               behavior: HitTestBehavior.opaque, // Capture all events within bounds
               child: Stack(
                 children: [
@@ -386,11 +414,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   ...List.generate(currentElements.length, (index) {
                     final element = currentElements[index];
                     // --- Add Logging Here ---
-                    print("  Rendering Index $index: ${element.id} (${element.type})");
+                    print("  Rendering Index $index: \\${element.id} (\\${element.type})");
                     // --- End Logging ---
-
                     List<Widget> elementWidgets = [];
-
                     // 1. Render the element content
                     if (element is GifElement) {
                       final bounds = element.bounds;
@@ -400,33 +426,34 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                           top: bounds.top,
                           width: bounds.width,
                           height: bounds.height,
-                          child: IgnorePointer(
+                          child: Transform.rotate(
+                            angle: element.rotation,
                             child: Image.network(
                               element.gifUrl,
-                              fit: BoxFit.fill,
+                              fit: BoxFit.cover,
                               loadingBuilder: (context, child, loadingProgress) {
                                 if (loadingProgress == null) return child;
-                                return Center(
-                                  child: CircularProgressIndicator(
-                                    value: loadingProgress.expectedTotalBytes != null
-                                        ? loadingProgress.cumulativeBytesLoaded /
-                                            loadingProgress.expectedTotalBytes!
-                                        : null,
+                                return Container(
+                                  color: Colors.grey.withOpacity(0.3),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      value: loadingProgress.expectedTotalBytes != null
+                                          ? loadingProgress.cumulativeBytesLoaded / 
+                                              loadingProgress.expectedTotalBytes!
+                                          : null,
+                                    ),
                                   ),
                                 );
                               },
                               errorBuilder: (context, error, stackTrace) {
-                                return element.previewUrl != null
-                                    ? Image.network(
-                                        element.previewUrl!,
-                                        fit: BoxFit.fill,
-                                        errorBuilder: (_, __, ___) => Container(
-                                            color: Colors.grey[300],
-                                            child: const Icon(Icons.broken_image)),
-                                      )
-                                    : Container(
-                                        color: Colors.grey[300],
-                                        child: const Icon(Icons.broken_image));
+                                print("Error loading GIF: $error");
+                                return Container(
+                                  color: Colors.grey.withOpacity(0.3),
+                                  child: const Center(
+                                    child: Text("Error loading GIF", 
+                                      style: TextStyle(color: Colors.red)),
+                                  ),
+                                );
                               },
                             ),
                           ),
@@ -462,44 +489,41 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     } else {
                       // Use CustomPaint for other types (Pen, Text, Image)
                       elementWidgets.add(
-                        CustomPaint(
-                          painter: ElementPainter(element: element, currentTransform: transform),
-                          size: Size.infinite, 
-                          // Optimization: repaint only if element changes?
-                          // isComplex: true, 
-                          // willChange: true, 
-                        )
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: ElementPainter(element: element, currentTransform: transform),
+                            size: Size.infinite, 
+                          ),
+                        ),
                       );
                     }
-
-                     // 2. Render selection handles on top if selected
+                    // 2. Render selection handles on top if selected
                     if (selectedIds.contains(element.id)) {
                       elementWidgets.add(
-                         CustomPaint(
-                           painter: SelectionPainter(element: element, currentTransform: transform),
-                           size: Size.infinite,
-                         )
+                         RepaintBoundary(
+                           child: CustomPaint(
+                             painter: SelectionPainter(element: element, currentTransform: transform),
+                             size: Size.infinite,
+                           ),
+                         ),
                       );
                     }
-
                     return Stack(
-                      // Use a key that includes the index to ensure rebuild on order change
                       key: ValueKey('element-${element.id}-$index'),
                       children: elementWidgets
-                    ); // Return a Stack containing element + optional handles
+                    );
                   }),
-
                   // Current drawing element (e.g., pen stroke) always on top during creation
                   if (currentDrawingElement != null)
-                     CustomPaint(
-                        painter: ElementPainter(element: currentDrawingElement, currentTransform: transform),
-                        size: Size.infinite,
+                     RepaintBoundary(
+                       child: CustomPaint(
+                          painter: ElementPainter(element: currentDrawingElement, currentTransform: transform),
+                          size: Size.infinite,
+                       ),
                      ),
-
                 ],
               ),
             ),
-
             // Make sure the toolbar is on top and properly positioned
             Positioned(
               left: 0,
@@ -534,7 +558,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 ),
               ),
             ),
-
             // Add the "+" button with animation based on toolbar height
             Consumer<DrawingProvider>(
               builder: (context, provider, _) {
@@ -551,7 +574,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 );
               },
             ),
-
             // Debug overlay - REMOVE IN PRODUCTION
             if (false) // Set to false to disable the debug overlay
               Positioned(
@@ -595,6 +617,24 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       context: context,
       position: position,
       items: [
+        // Make the sticky note option more prominent by placing it at the top
+        PopupMenuItem(
+          child: const ListTile(
+            leading: Icon(Icons.sticky_note_2, color: Colors.amber),
+            title: Text('Add Sticky Note', 
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          onTap: () {
+            Future.delayed(const Duration(milliseconds: 10), () {
+              // Get the canvas center position
+              final center = _getCanvasCenter(provider, context);
+              provider.createStickyNote(center);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Sticky note created!'))
+              );
+            });
+          },
+        ),
         PopupMenuItem(
           child: const ListTile(
             leading: Icon(Icons.image),
@@ -695,6 +735,67 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       ),
     );
   }
+
+  // Note Edit Dialog implementation
+  void _showNoteEditDialog(BuildContext context, DrawingProvider provider, NoteElement note) {
+    final titleController = TextEditingController(text: note.title);
+    final contentController = TextEditingController(text: note.content);
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Note'),
+          content: SizedBox(
+            width: 300,
+            height: 250,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    hintText: 'Note title'
+                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: TextField(
+                    controller: contentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Content',
+                      hintText: 'Note content'
+                    ),
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                provider.updateNoteContent(
+                  note.id, 
+                  titleController.text,
+                  contentController.text
+                );
+                Navigator.of(context).pop();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 // --- ElementPainter ---
@@ -725,15 +826,15 @@ class ElementPainter extends CustomPainter {
     element.render(canvas, inverseScale: inverseScale);
     
     // Restore the canvas to its original state
-    canvas.restore();
+    canvas.restore();    
   }
-
+  
   @override
   bool shouldRepaint(covariant ElementPainter oldDelegate) {
     // Repaint if element or transform changes
     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
-}
+} 
 
 // --- SelectionPainter ---
 class SelectionPainter extends CustomPainter {
@@ -744,27 +845,39 @@ class SelectionPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-      final double scale = currentTransform.getMaxScaleOnAxis();
-      final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
-      
-      // Save the current canvas state
-      canvas.save();
-      
-      // If the element has rotation, apply it
-      if (element.rotation != 0) {
-        final center = element.bounds.center;
-        canvas.translate(center.dx, center.dy);
-        canvas.rotate(element.rotation);
-        canvas.translate(-center.dx, -center.dy);
-      }
-      
-      _drawSelectionHandles(canvas, element, inverseScale);
-      
-      // Restore the canvas
-      canvas.restore();
-      
-      // Draw the rotation handle separately (it should not be rotated with the element)
-      _drawRotationHandle(canvas, element, inverseScale);
+    final double scale = currentTransform.getMaxScaleOnAxis();
+    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+    final Rect bounds = element.bounds;
+    if (bounds.isEmpty) return;
+    
+    canvas.save();
+    
+    // Draw selection rectangle without rotation first
+    final Paint selectionPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5 * inverseScale;
+    
+    // If the element has rotation, apply it
+    if (element.rotation != 0) {
+      // Rotate around the center of the element's bounds
+      final center = element.bounds.center;
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(element.rotation);
+      canvas.translate(-center.dx, -center.dy);
+    }
+    
+    // Draw the selection box
+    canvas.drawRect(bounds.inflate(1.5 * inverseScale), selectionPaint);
+    
+    // Draw selection handles (these should not be rotated with the element)
+    _drawSelectionHandles(canvas, element, inverseScale);
+    
+    // Restore canvas state before drawing rotation handle
+    canvas.restore();
+    
+    // Now draw rotation handle (which shouldn't be rotated)
+    _drawRotationHandle(canvas, element, inverseScale);
   }
 
   void _drawSelectionHandles(Canvas canvas, DrawingElement element, double inverseScale) {
@@ -772,22 +885,15 @@ class SelectionPainter extends CustomPainter {
     if (bounds.isEmpty) return;
 
     final double handleSize = 8.0 * inverseScale;
-    final double strokeWidth = 1.5 * inverseScale;
     final handlePaintFill = Paint()..color = Colors.white;
     final handlePaintStroke = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth;
-
-    // Draw outline rect
-    canvas.drawRect(
-      bounds.inflate(strokeWidth / 2),
-      handlePaintStroke..color = handlePaintStroke.color.withOpacity(0.7)
-    );
+      ..strokeWidth = 1.5 * inverseScale;
 
     // Calculate and draw handles
     final handles = calculateHandles(bounds, handleSize);
-    // Draw only corner and edge handles here
+    // Draw only corner and edge handles here    
     final handlesToDraw = [
       ResizeHandleType.topLeft,
       ResizeHandleType.topRight,
@@ -807,11 +913,11 @@ class SelectionPainter extends CustomPainter {
       }
     }
   }
-  
+
   void _drawRotationHandle(Canvas canvas, DrawingElement element, double inverseScale) {
     final Rect bounds = element.bounds;
     if (bounds.isEmpty) return;
-    
+
     final double handleSize = 8.0 * inverseScale;
     final handlePaintFill = Paint()..color = Colors.white;
     final handlePaintStroke = Paint()
@@ -821,13 +927,11 @@ class SelectionPainter extends CustomPainter {
       
     final handles = calculateHandles(bounds, handleSize);
     final rotationRect = handles[ResizeHandleType.rotate];
-    
     if (rotationRect != null) {
       // Draw line from top center of bounds to rotation handle
       final center = bounds.center;
       final topCenter = Offset(center.dx, bounds.top);
       final handleCenter = rotationRect.center;
-      
       canvas.drawLine(
         topCenter,
         handleCenter,
@@ -842,8 +946,7 @@ class SelectionPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SelectionPainter oldDelegate) {
-     // Repaint if element or transform changes
-     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
+    // Repaint if element or transform changes
+    return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
-
 }

@@ -17,9 +17,9 @@ class TextElement extends DrawingElement {
   late final TextPainter _textPainter;
 
   TextElement({
-    String? id,
-    required Offset position,
-    bool isSelected = false,
+    super.id,
+    required super.position,
+    super.isSelected,
     required this.text,
     required this.color,
     this.fontSize = 24.0,
@@ -27,8 +27,8 @@ class TextElement extends DrawingElement {
     this.fontWeight = FontWeight.normal,
     this.fontStyle = FontStyle.normal,
     this.textAlign = TextAlign.left,
-    double rotation = 0.0, // Add rotation parameter
-  }) : super(id: id, type: ElementType.text, position: position, isSelected: isSelected, rotation: rotation) {
+    super.rotation, // Add rotation parameter
+  }) : super(type: ElementType.text) {
     // Initialize TextPainter immediately
     _updateTextPainter();
   }
@@ -61,7 +61,10 @@ class TextElement extends DrawingElement {
 
   @override
   void render(Canvas canvas, {double inverseScale = 1.0}) {
-    _textPainter.paint(canvas, position);
+    // Apply rotation around the center of the text
+    applyRotation(canvas, bounds, () {
+      _textPainter.paint(canvas, position);
+    });
   }
 
   @override
