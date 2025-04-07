@@ -174,6 +174,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
               transformationController: _transformationController,
               boundaryMargin: const EdgeInsets.all(0),
               maxScale: 10.0,
+              minScale: 0.05, // Add this parameter to allow zooming out much further
               // Only enable pan and zoom with 2+ fingers (or ctrl+scroll/alt+scroll on web/desktop)
               panEnabled: _pointerCount >= 2,
               scaleEnabled: _pointerCount >= 2,
