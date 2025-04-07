@@ -11,7 +11,7 @@ enum ResizeHandleType {
   bottomLeft,
   bottomMiddle,
   bottomRight,
-  rotate // Example for future rotation handle
+  rotate // Add rotation handle type
 }
 
 // Helper function to calculate the positions (Rects) of handles based on element bounds
@@ -22,7 +22,7 @@ Map<ResizeHandleType, Rect> calculateHandles(Rect bounds, double handleSize) {
   }
   double halfHandle = handleSize / 2.0;
 
-  return {
+  final result = {
     // Corners
     ResizeHandleType.topLeft: Rect.fromCenter(center: bounds.topLeft, width: handleSize, height: handleSize),
     ResizeHandleType.topRight: Rect.fromCenter(center: bounds.topRight, width: handleSize, height: handleSize),
@@ -35,7 +35,13 @@ Map<ResizeHandleType, Rect> calculateHandles(Rect bounds, double handleSize) {
     ResizeHandleType.middleLeft: Rect.fromCenter(center: bounds.centerLeft, width: handleSize, height: handleSize),
     ResizeHandleType.middleRight: Rect.fromCenter(center: bounds.centerRight, width: handleSize, height: handleSize),
 
-    // Rotation Handle (example position)
-    // ResizeHandleType.rotate: Rect.fromCenter(center: bounds.topCenter - Offset(0, handleSize * 2.5), width: handleSize * 1.2, height: handleSize * 1.2),
+    // Rotation Handle - positioned above top center
+    ResizeHandleType.rotate: Rect.fromCenter(
+      center: Offset(bounds.center.dx, bounds.top - handleSize * 2), 
+      width: handleSize * 1.2, 
+      height: handleSize * 1.2
+    ),
   };
+
+  return result;
 }

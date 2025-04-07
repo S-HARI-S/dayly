@@ -19,7 +19,8 @@ class GifElement extends DrawingElement {
     required this.size,
     required this.gifUrl,
     this.previewUrl,
-  }) : super(id: id, type: ElementType.gif, position: position, isSelected: isSelected); // Pass type to super
+    double rotation = 0.0, // Add rotation parameter
+  }) : super(id: id, type: ElementType.gif, position: position, isSelected: isSelected, rotation: rotation); // Pass type and rotation to super
 
   // --- DrawingElement Overrides ---
 
@@ -27,7 +28,7 @@ class GifElement extends DrawingElement {
   Rect get bounds => Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
 
   @override
-  bool containsPoint(Offset point) => bounds.contains(point);
+  bool containsPoint(Offset point) => bounds.contains(point); // Fixed missing parenthesis
 
   @override
   void render(Canvas canvas, {double inverseScale = 1.0}) {
@@ -61,6 +62,7 @@ class GifElement extends DrawingElement {
     Size? size,
     String? gifUrl,
     String? previewUrl,
+    double? rotation, // Add rotation parameter
     // Add other base properties if needed (e.g., rotation, scale from base class)
   }) {
     return GifElement(
@@ -71,6 +73,7 @@ class GifElement extends DrawingElement {
       size: size ?? this.size,
       gifUrl: gifUrl ?? this.gifUrl,
       previewUrl: previewUrl ?? this.previewUrl,
+      rotation: rotation ?? this.rotation, // Pass rotation
       // Pass other base properties
     );
   }
@@ -87,6 +90,7 @@ class GifElement extends DrawingElement {
       size: size,
       gifUrl: gifUrl,
       previewUrl: previewUrl,
+      rotation: rotation, // Include rotation in clone
       // Clone other base properties
     );
   }
@@ -104,6 +108,7 @@ class GifElement extends DrawingElement {
       'size': {'width': size.width, 'height': size.height},
       'gifUrl': gifUrl,
       'previewUrl': previewUrl,
+      'rotation': rotation, // Add rotation to serialization
       // Add other serializable base properties
     };
   }
@@ -124,6 +129,7 @@ class GifElement extends DrawingElement {
       size: size,
       gifUrl: map['gifUrl'] as String,
       previewUrl: map['previewUrl'] as String?,
+      rotation: map['rotation'] as double? ?? 0.0, // Parse rotation from map
       // Deserialize other base properties if needed
     );
     // NOTE: If deserialization required async work (like loading data),

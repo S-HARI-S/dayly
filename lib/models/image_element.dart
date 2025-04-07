@@ -16,7 +16,8 @@ class ImageElement extends DrawingElement {
     required this.image,
     required this.size,
     this.imagePath,
-  }) : super(id: id, type: ElementType.image, position: position, isSelected: isSelected);
+    double rotation = 0.0, // Add rotation parameter
+  }) : super(id: id, type: ElementType.image, position: position, isSelected: isSelected, rotation: rotation);
 
   // --- DrawingElement Overrides ---
 
@@ -54,6 +55,7 @@ class ImageElement extends DrawingElement {
     ui.Image? image, // Allow replacing image if needed
     Size? size,      // Allow resizing
     String? imagePath,
+    double? rotation, // Add rotation parameter
   }) {
     return ImageElement(
       id: id ?? this.id,
@@ -62,6 +64,7 @@ class ImageElement extends DrawingElement {
       image: image ?? this.image, // Keep original image by default
       size: size ?? this.size,    // Keep original size by default
       imagePath: imagePath ?? this.imagePath,
+      rotation: rotation ?? this.rotation, // Include rotation
     );
   }
 
@@ -76,6 +79,7 @@ class ImageElement extends DrawingElement {
       image: image, // Copy reference
       size: size,
       imagePath: imagePath,
+      rotation: rotation, // Include rotation in clone
     );
   }
   
@@ -89,6 +93,7 @@ class ImageElement extends DrawingElement {
       'isSelected': isSelected,
       'size': {'width': size.width, 'height': size.height},
       'imagePath': imagePath,
+      'rotation': rotation, // Add rotation to serialization
     };
   }
   

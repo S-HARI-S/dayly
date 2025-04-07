@@ -22,12 +22,14 @@ abstract class DrawingElement {
   final ElementType type; // Type of the element
   final Offset position; // Usually the top-left corner, but interpretation depends on the element
   final bool isSelected; // Flag indicating if the element is currently selected
+  final double rotation; // Rotation angle in radians
 
   DrawingElement({
     String? id,
     required this.type,
     required this.position,
     this.isSelected = false,
+    this.rotation = 0.0, // Default rotation is 0
   }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString() + UniqueKey().toString(); // More robust unique ID
 
   // Abstract method for subclasses to implement hit testing logic
@@ -47,6 +49,7 @@ abstract class DrawingElement {
     Offset? position,
     bool? isSelected,
     Size? size, // Ensure this parameter exists in the base class
+    double? rotation, // Add rotation parameter
   });
 
   // Abstract method for creating a deep clone of the element state.

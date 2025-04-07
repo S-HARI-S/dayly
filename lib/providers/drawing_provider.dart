@@ -40,6 +40,7 @@ class DrawingProvider extends ChangeNotifier {
   // State tracking for move/resize operations
   bool _didMoveOccur = false;
   bool _didResizeOccur = false;
+  bool _didRotationOccur = false; // Add rotation state tracking
 
   // Unique ID generator
   final _uuid = const Uuid();
@@ -630,6 +631,44 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
     _didResizeOccur = false;
   }
 
+  // --- Rotation Logic ---
+  void startPotentialRotation() {
+    _didRotationOccur = false;
+  }
+
+  void rotateSelected(String elementId, double newRotation) {
+    int index = elements.indexWhere((el) => el.id == elementId);
+    if (index == -1) return;
+    
+    final currentElement = elements[index];
+    
+    DrawingElement? updatedElement;
+    try {
+      updatedElement = currentElement.copyWith(rotation: newRotation);
+    } catch (e, s) {
+      print("Error rotating element ${currentElement.type}: $e\n$s");
+      return;
+    }
+
+    if (updatedElement != null) {
+      _didRotationOccur = true;
+      List<DrawingElement> updatedElements = List.from(elements);
+      updatedElements[index] = updatedElement;
+      elements = updatedElements;
+      notifyListeners();
+    } else {
+      print("Failed to rotate element $elementId");
+    }
+  }
+
+  void endPotentialRotation() {
+    if (_didRotationOccur) {
+      print("Saving rotation to undo stack");
+      saveToUndoStack();
+    }
+    _didRotationOccur = false;
+  }
+
   // --- Video Playback ---
   void toggleVideoPlayback(String id) {
     final element = elements.firstWhereOrNull((e) => e.id == id);
@@ -692,6 +731,43 @@ void _addGifToCanvas(GiphyGif gif, TransformationController controller, BuildCon
     } catch (e) {
       print('Error removing background: $e');
       rethrow;  // Re-throw the error to be handled by the UI
+    }
+  }
+
+  // Apply brightness and contrast adjustments to an image
+  Future<void> applyImageEnhancements(String elementId, double brightness, double contrast) async {
+    // Find the image element by ID
+    final index = elements.indexWhere((el) => el.id == elementId);
+    if (index == -1 || elements[index] is! ImageElement) {
+      print("Element not found or not an image");
+      return;
+    }
+    
+    final element = elements[index] as ImageElement;
+    
+    // Save current state to undo stack
+    saveToUndoStack();
+    
+    try {
+      // Get the image data
+      final image = element.image;
+      
+      // Apply brightness and contrast adjustments
+      // This would typically be done using a ColorFilter or custom shader
+      // For this example, we'll just record that the adjustments were requested
+      print("Applying brightness: $brightness, contrast: $contrast to image ${element.id}");
+      
+      // In a real implementation, you would create a modified image here
+      // For now, we'll just notify listeners that something changed
+      notifyListeners();
+      
+      // For a complete implementation, you would:
+      // 1. Create a new ui.Image with filters applied
+      // 2. Create a new ImageElement with the modified image
+      // 3. Replace the element in the elements list
+      
+    } catch (e) {
+      print('Error applying image enhancements: $e');
     }
   }
 

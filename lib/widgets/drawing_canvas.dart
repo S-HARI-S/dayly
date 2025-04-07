@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4, MatrixUtils;
 import 'package:collection/collection.dart'; // Import for firstWhereOrNull etc.
 import 'package:video_player/video_player.dart';
+import 'dart:math' as math;
 
 import '../providers/drawing_provider.dart';
 import '../models/element.dart';
@@ -38,6 +39,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? _potentialInteractionStartPosition; 
   Offset? _lastInteractionPosition;
   bool _isResizingElement = false; 
+  bool _isRotatingElement = false; // Add state for rotation
   ResizeHandleType? _draggedHandle;
   DrawingElement? _elementBeingInteractedWith;
   static const Duration longPressDuration = Duration(milliseconds: 200);
@@ -46,6 +48,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   // Add state for toolbar height
   double _toolbarHeight = 0.0;
 
+  // Initial angle for rotation tracking
+  double? _startRotationAngle;
+  
   // Helper method to get transformed canvas position
   Offset _getTransformedCanvasPosition(Offset globalPosition) {
     final RenderBox box = context.findRenderObject() as RenderBox;
@@ -67,6 +72,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       if (entry.value.inflate(touchPadding).contains(point)) return entry.key;
     } 
     return null;
+  }
+
+  // Helper method to calculate angle between two points relative to center
+  double _calculateAngle(Offset center, Offset point) {
+    return math.atan2(point.dy - center.dy, point.dx - center.dx);
   }
 
   @override
@@ -122,8 +132,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   _activePointers++; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
+                  _isRotatingElement = false; // Reset rotation state
                   _draggedHandle = null; 
                   _elementBeingInteractedWith = null; 
+                  _startRotationAngle = null; // Reset rotation angle
                 });
                 
                 _potentialInteractionStartPosition = localPosition; 
@@ -146,10 +158,23 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
                       if (_draggedHandle != null) {
                         setState(() { 
-                          _isResizingElement = true;
+                          if (_draggedHandle == ResizeHandleType.rotate) {
+                            _isRotatingElement = true;
+                            // Store initial rotation angle between element center and pointer
+                            final elementCenter = selectedElement.bounds.center;
+                            _startRotationAngle = _calculateAngle(elementCenter, localPosition) - selectedElement.rotation;
+                          } else {
+                            _isResizingElement = true;
+                          }
                           _elementBeingInteractedWith = selectedElement; 
                         });
-                        drawingProvider.startPotentialResize(); 
+                        
+                        if (_isRotatingElement) {
+                          drawingProvider.startPotentialRotation();
+                        } else {
+                          drawingProvider.startPotentialResize();
+                        }
+                        
                         HapticFeedback.mediumImpact();
                         print("Handle HIT: $_draggedHandle on ${selectedElement.id}"); 
                         actionTaken = true;
@@ -219,7 +244,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 final currentTool = drawingProvider.currentTool;
 
                 if (currentTool == ElementType.select) {
-                  if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
+                  // Handle rotation
+                  if (_isRotatingElement && _elementBeingInteractedWith != null && _startRotationAngle != null) {
+                    final elementCenter = _elementBeingInteractedWith!.bounds.center;
+                    final currentAngle = _calculateAngle(elementCenter, localPosition);
+                    final newRotation = currentAngle - _startRotationAngle!;
+                    
+                    drawingProvider.rotateSelected(_elementBeingInteractedWith!.id, newRotation);
+                  }
+                  // Handle resizing
+                  else if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
                     drawingProvider.resizeSelected(
                       _elementBeingInteractedWith!.id, 
                       _draggedHandle!, 
@@ -227,7 +261,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       localPosition, 
                       _potentialInteractionStartPosition ?? localPosition
                     );
-                  } else if (_elementBeingInteractedWith != null) {
+                  } 
+                  // Handle moving
+                  else if (_elementBeingInteractedWith != null) {
                     // Cancel move timer if pointer moves beyond threshold before timer fires
                     if (_moveDelayTimer?.isActive ?? false) { 
                       if ((localPosition - _potentialInteractionStartPosition!).distance > moveCancelThreshold) { 
@@ -254,14 +290,17 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 final currentTool = drawingProvider.currentTool;
                 bool wasMoving = _isMovingElement; 
                 bool wasResizing = _isResizingElement;
+                bool wasRotating = _isRotatingElement; // Track rotation state
                 DrawingElement? interactedElement = _elementBeingInteractedWith;
 
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
+                  _isRotatingElement = false; // Reset rotation flag
                   _draggedHandle = null; 
-                  _elementBeingInteractedWith = null; 
+                  _elementBeingInteractedWith = null;
+                  _startRotationAngle = null; // Reset rotation angle
                 });
                 _lastInteractionPosition = null; 
                 _potentialInteractionStartPosition = null;
@@ -275,6 +314,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     else if (wasMoving) { 
                       print("End Move"); 
                       drawingProvider.endPotentialMove(); 
+                    }
+                    else if (wasRotating) { 
+                      print("End Rotation"); 
+                      drawingProvider.endPotentialRotation(); 
                     }
                     // Check if it was a tap on an element (not a drag or resize)
                     else if (interactedElement != null) {
@@ -306,6 +349,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                  _cancelMoveTimer(); 
                  bool wasMoving = _isMovingElement;
                  bool wasResizing = _isResizingElement;
+                 bool wasRotating = _isRotatingElement; // Track rotation state
                  
                  // Decide how to handle cancel: discard or finalize based on state
                  if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
@@ -317,14 +361,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                  else if (wasMoving) { 
                     drawingProvider.endPotentialMove();
                  }
+                 else if (wasRotating) { 
+                    drawingProvider.endPotentialRotation();
+                 }
                  
                  // Reset state regardless
                  setState(() { 
                    _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                    _isMovingElement = false; 
                    _isResizingElement = false; 
+                   _isRotatingElement = false; // Reset rotation flag
                    _draggedHandle = null; 
                    _elementBeingInteractedWith = null; 
+                   _startRotationAngle = null; // Reset rotation angle
                  });
                  _lastInteractionPosition = null;
                  _potentialInteractionStartPosition = null;
@@ -648,7 +697,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 }
 
-// --- NEW: ElementPainter ---
+// --- ElementPainter ---
 class ElementPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
@@ -659,7 +708,24 @@ class ElementPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final double scale = currentTransform.getMaxScaleOnAxis();
     final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+    
+    // Save the current canvas state
+    canvas.save();
+    
+    // If the element has rotation, apply it
+    if (element.rotation != 0) {
+      // Rotate around the center of the element's bounds
+      final center = element.bounds.center;
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(element.rotation);
+      canvas.translate(-center.dx, -center.dy);
+    }
+    
+    // Render the element
     element.render(canvas, inverseScale: inverseScale);
+    
+    // Restore the canvas to its original state
+    canvas.restore();
   }
 
   @override
@@ -669,7 +735,7 @@ class ElementPainter extends CustomPainter {
   }
 }
 
-// --- NEW: SelectionPainter ---
+// --- SelectionPainter ---
 class SelectionPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
@@ -680,7 +746,25 @@ class SelectionPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
       final double scale = currentTransform.getMaxScaleOnAxis();
       final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+      
+      // Save the current canvas state
+      canvas.save();
+      
+      // If the element has rotation, apply it
+      if (element.rotation != 0) {
+        final center = element.bounds.center;
+        canvas.translate(center.dx, center.dy);
+        canvas.rotate(element.rotation);
+        canvas.translate(-center.dx, -center.dy);
+      }
+      
       _drawSelectionHandles(canvas, element, inverseScale);
+      
+      // Restore the canvas
+      canvas.restore();
+      
+      // Draw the rotation handle separately (it should not be rotated with the element)
+      _drawRotationHandle(canvas, element, inverseScale);
   }
 
   void _drawSelectionHandles(Canvas canvas, DrawingElement element, double inverseScale) {
@@ -703,12 +787,16 @@ class SelectionPainter extends CustomPainter {
 
     // Calculate and draw handles
     final handles = calculateHandles(bounds, handleSize);
-    // Draw only corner handles for simplicity now, can add edge handles later
+    // Draw only corner and edge handles here
     final handlesToDraw = [
       ResizeHandleType.topLeft,
       ResizeHandleType.topRight,
       ResizeHandleType.bottomLeft,
       ResizeHandleType.bottomRight,
+      ResizeHandleType.topMiddle,
+      ResizeHandleType.bottomMiddle,
+      ResizeHandleType.middleLeft,
+      ResizeHandleType.middleRight,
     ];
 
     for (var handleType in handlesToDraw) {
@@ -717,6 +805,38 @@ class SelectionPainter extends CustomPainter {
         canvas.drawOval(handleRect, handlePaintFill);
         canvas.drawOval(handleRect, handlePaintStroke);
       }
+    }
+  }
+  
+  void _drawRotationHandle(Canvas canvas, DrawingElement element, double inverseScale) {
+    final Rect bounds = element.bounds;
+    if (bounds.isEmpty) return;
+    
+    final double handleSize = 8.0 * inverseScale;
+    final handlePaintFill = Paint()..color = Colors.white;
+    final handlePaintStroke = Paint()
+      ..color = Colors.green // Use a different color for rotation handle
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5 * inverseScale;
+      
+    final handles = calculateHandles(bounds, handleSize);
+    final rotationRect = handles[ResizeHandleType.rotate];
+    
+    if (rotationRect != null) {
+      // Draw line from top center of bounds to rotation handle
+      final center = bounds.center;
+      final topCenter = Offset(center.dx, bounds.top);
+      final handleCenter = rotationRect.center;
+      
+      canvas.drawLine(
+        topCenter,
+        handleCenter,
+        handlePaintStroke
+      );
+      
+      // Draw circular rotation handle
+      canvas.drawCircle(handleCenter, handleSize * 0.6, handlePaintFill);
+      canvas.drawCircle(handleCenter, handleSize * 0.6, handlePaintStroke);
     }
   }
 

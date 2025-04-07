@@ -20,8 +20,9 @@ class VideoElement extends DrawingElement {
     required this.videoUrl,
     required this.controller,
     required this.size,
+    double rotation = 0.0, // Add rotation parameter
   }) : _showPlayIconNotifier = ValueNotifier(!controller.value.isPlaying),
-       super(id: id, type: ElementType.video, position: position, isSelected: isSelected) {
+       super(id: id, type: ElementType.video, position: position, isSelected: isSelected, rotation: rotation) {
     controller.addListener(_onVideoStateChanged);
     _onVideoStateChanged(); // Update initial state
   }
@@ -116,6 +117,7 @@ class VideoElement extends DrawingElement {
     Size? size,
     String? videoUrl,
     VideoPlayerController? controller,
+    double? rotation, // Add rotation parameter
   }) {
     assert(videoUrl == null && controller == null, "Cannot change video source or controller via copyWith.");
     return VideoElement(
@@ -125,6 +127,7 @@ class VideoElement extends DrawingElement {
       videoUrl: this.videoUrl,
       controller: this.controller,
       size: size ?? this.size,
+      rotation: rotation ?? this.rotation, // Include rotation
     );
   }
 
@@ -138,6 +141,7 @@ class VideoElement extends DrawingElement {
       videoUrl: videoUrl,
       controller: controller,
       size: size,
+      rotation: rotation, // Include rotation in clone
     );
   }
   
@@ -151,6 +155,7 @@ class VideoElement extends DrawingElement {
       'isSelected': isSelected,
       'size': {'width': size.width, 'height': size.height},
       'videoUrl': videoUrl,
+      'rotation': rotation, // Add rotation to serialization
       // We don't serialize the controller - it will be recreated on load
     };
   }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:collection/collection.dart';
 import '../providers/drawing_provider.dart';
 import '../models/element.dart';
 import '../models/image_element.dart';
 import '../services/background_removal_service.dart';
+import 'dart:math' as math;
 
 class ContextToolbar extends StatefulWidget {
   final double height;
@@ -239,6 +241,21 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
       ),
       _buildToolButton(
         context: context,
+        icon: Icons.rotate_90_degrees_ccw, // Add rotation button
+        label: 'Rotate',
+        onPressed: () {
+          // Rotate the selected element by 90 degrees (π/2 radians)
+          final element = provider.elements.firstWhereOrNull((e) => e.id == elementId);
+          if (element != null) {
+            // Add π/2 to current rotation (90 degrees clockwise)
+            final newRotation = element.rotation + math.pi/2;
+            provider.rotateSelected(element.id, newRotation);
+            provider.endPotentialRotation();
+          }
+        },
+      ),
+      _buildToolButton(
+        context: context,
         icon: Icons.delete_outline,
         label: 'Delete',
         color: Colors.redAccent, // Make delete stand out
@@ -256,10 +273,8 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
         icon: Icons.auto_fix_high,
         label: 'Enhance',
         onPressed: () {
-          // Image enhancement feature placeholder
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Image enhancement coming soon!')),
-          );
+          // Show image enhancement dialog instead of just a message
+          _showImageEnhancementDialog(context, provider, element);
         },
       ),
       _buildToolButton(
@@ -318,6 +333,77 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
       ..._buildCommonTools(context, provider, element.id),
     ];
   }
+  
+  // New method to show image enhancement dialog
+  void _showImageEnhancementDialog(BuildContext context, DrawingProvider provider, ImageElement element) {
+    double brightness = 0.0; // Range: -1.0 to 1.0
+    double contrast = 0.0;   // Range: -1.0 to 1.0
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Image Enhancement'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Brightness'),
+                  Slider(
+                    value: brightness,
+                    min: -1.0,
+                    max: 1.0,
+                    divisions: 20,
+                    label: brightness.toStringAsFixed(1),
+                    onChanged: (value) {
+                      setState(() {
+                        brightness = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Contrast'),
+                  Slider(
+                    value: contrast,
+                    min: -1.0,
+                    max: 1.0,
+                    divisions: 20,
+                    label: contrast.toStringAsFixed(1),
+                    onChanged: (value) {
+                      setState(() {
+                        contrast = value;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                TextButton(
+                  child: const Text('Apply'),
+                  onPressed: () {
+                    // Call provider method to apply enhancements
+                    provider.applyImageEnhancements(element.id, brightness, contrast);
+                    Navigator.of(context).pop();
+                    
+                    // Show confirmation message
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Image enhancements applied')),
+                    );
+                  },
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
 
   List<Widget> _buildVideoTools(BuildContext context, DrawingProvider provider, String elementId) {
     // Example: Add common tools here too if needed
@@ -335,13 +421,13 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
 
   List<Widget> _buildGifTools(BuildContext context, DrawingProvider provider, String elementId) {
     // Add common tools
-     return _buildCommonTools(context, provider, elementId);
+    return _buildCommonTools(context, provider, elementId);
   }
 
   List<Widget> _buildTextTools(BuildContext context, DrawingProvider provider, String elementId) {
     // Example: Add common tools here too if needed
     return [
-       _buildToolButton(
+      _buildToolButton(
           context: context,
           icon: Icons.edit, // Placeholder
           label: 'Edit Text',
@@ -358,11 +444,10 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
 
   List<Widget> _buildDefaultTools(BuildContext context, DrawingProvider provider, String elementId) {
     // Just the common tools for Pen, etc.
-     return _buildCommonTools(context, provider, elementId);
+    return _buildCommonTools(context, provider, elementId);
   }
 
   // --- Individual Tool Button Widget ---
-
   Widget _buildToolButton({
     required BuildContext context,
     required IconData icon,

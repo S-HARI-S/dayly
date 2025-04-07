@@ -16,7 +16,8 @@ class PenElement extends DrawingElement {
     required this.points,
     required this.color,
     required this.strokeWidth,
-  }) : super(id: id, type: ElementType.pen, position: position, isSelected: isSelected);
+    double rotation = 0.0, // Add rotation parameter
+  }) : super(id: id, type: ElementType.pen, position: position, isSelected: isSelected, rotation: rotation);
 
   // --- DrawingElement Overrides ---
 
@@ -99,6 +100,7 @@ class PenElement extends DrawingElement {
     Color? color,
     double? strokeWidth,
     Size? size, // Size parameter for resizing - requires scaling points
+    double? rotation, // Add rotation parameter
   }) {
     List<Offset> finalPoints = points ?? this.points;
     Offset finalPosition = position ?? this.position; // Original or new position
@@ -140,6 +142,7 @@ class PenElement extends DrawingElement {
       points: finalPoints, // Use the updated points list
       color: color ?? this.color,
       strokeWidth: strokeWidth ?? this.strokeWidth,
+      rotation: rotation ?? this.rotation, // Pass rotation
     );
   }
 
@@ -153,6 +156,7 @@ class PenElement extends DrawingElement {
       points: List<Offset>.from(points), // *** Crucial: Deep copy the points list ***
       color: color,
       strokeWidth: strokeWidth,
+      rotation: rotation, // Include rotation in clone
     );
   }
   
@@ -167,6 +171,7 @@ class PenElement extends DrawingElement {
       'color': color.value, // Store color as integer value
       'strokeWidth': strokeWidth,
       'points': points.map((p) => {'dx': p.dx, 'dy': p.dy}).toList(),
+      'rotation': rotation, // Add rotation to serialization
     };
   }
   
@@ -193,6 +198,7 @@ class PenElement extends DrawingElement {
       color: Color(map['color']),
       strokeWidth: map['strokeWidth'],
       points: pointsList,
+      rotation: map['rotation'] ?? 0.0, // Parse rotation from map
     );
   }
 }

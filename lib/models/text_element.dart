@@ -27,7 +27,8 @@ class TextElement extends DrawingElement {
     this.fontWeight = FontWeight.normal,
     this.fontStyle = FontStyle.normal,
     this.textAlign = TextAlign.left,
-  }) : super(id: id, type: ElementType.text, position: position, isSelected: isSelected) {
+    double rotation = 0.0, // Add rotation parameter
+  }) : super(id: id, type: ElementType.text, position: position, isSelected: isSelected, rotation: rotation) {
     // Initialize TextPainter immediately
     _updateTextPainter();
   }
@@ -76,6 +77,7 @@ class TextElement extends DrawingElement {
     FontStyle? fontStyle,
     TextAlign? textAlign,
     Size? size,
+    double? rotation, // Add rotation parameter
   }) {
     double finalFontSize = fontSize ?? this.fontSize;
 
@@ -98,6 +100,7 @@ class TextElement extends DrawingElement {
       fontWeight: fontWeight ?? this.fontWeight,
       fontStyle: fontStyle ?? this.fontStyle,
       textAlign: textAlign ?? this.textAlign,
+      rotation: rotation ?? this.rotation, // Pass rotation
     );
   }
 
@@ -114,6 +117,7 @@ class TextElement extends DrawingElement {
       fontWeight: fontWeight,
       fontStyle: fontStyle,
       textAlign: textAlign,
+      rotation: rotation, // Include rotation in clone
     );
   }
 
@@ -133,6 +137,7 @@ class TextElement extends DrawingElement {
       'fontWeight': fontWeight.index, // Store enum index
       'fontStyle': fontStyle.index,
       'textAlign': textAlign.index,
+      'rotation': rotation, // Add rotation to serialization
     };
   }
 
@@ -154,6 +159,7 @@ class TextElement extends DrawingElement {
       fontWeight: FontWeight.values[map['fontWeight'] ?? FontWeight.normal.index],
       fontStyle: FontStyle.values[map['fontStyle'] ?? FontStyle.normal.index],
       textAlign: TextAlign.values[map['textAlign'] ?? TextAlign.left.index],
+      rotation: map['rotation'] ?? 0.0, // Parse rotation from map
     );
   }
 }
