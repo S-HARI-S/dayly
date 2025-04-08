@@ -2,9 +2,16 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'element.dart';
+import 'dart:math' as math;
 
 // Represents a text element on the canvas
 class TextElement extends DrawingElement {
+  // Add size constraints as static constants
+  static const double MIN_FONT_SIZE = 8.0;
+  static const double MAX_FONT_SIZE = 72.0; // Match the toolbar's maximum
+  static const double MIN_WIDTH = 20.0;
+  static const double MIN_HEIGHT = 20.0;
+  
   final String text;
   final Color color;
   final double fontSize;
@@ -61,10 +68,8 @@ class TextElement extends DrawingElement {
 
   @override
   void render(Canvas canvas, {double inverseScale = 1.0}) {
-    // Apply rotation around the center of the text
-    applyRotation(canvas, bounds, () {
-      _textPainter.paint(canvas, position);
-    });
+    // Remove rotation application since ElementPainter handles it
+    _textPainter.paint(canvas, position);
   }
 
   @override
@@ -80,21 +85,45 @@ class TextElement extends DrawingElement {
     FontStyle? fontStyle,
     TextAlign? textAlign,
     Size? size,
-    double? rotation, // Add rotation parameter
+    double? rotation,
   }) {
     double finalFontSize = fontSize ?? this.fontSize;
+    Offset finalPosition = position ?? this.position;
 
     if (size != null) {
-        Rect oldBounds = bounds;
-        if (!oldBounds.isEmpty && oldBounds.height > 0) {
-            double scaleY = size.height / oldBounds.height;
-            finalFontSize = (this.fontSize * scaleY).clamp(8.0, 500.0);
-        }
+      Rect oldBounds = bounds;
+      if (!oldBounds.isEmpty && oldBounds.height > 0) {
+        // Ensure size respects minimum constraints
+        double constrainedWidth = math.max(size.width, MIN_WIDTH);
+        double constrainedHeight = math.max(size.height, MIN_HEIGHT);
+        
+        // Calculate scale factors
+        double scaleX = constrainedWidth / oldBounds.width;
+        double scaleY = constrainedHeight / oldBounds.height;
+        
+        // Use the smaller scale to maintain aspect ratio
+        double scale = math.min(scaleX, scaleY);
+        
+        // Update font size based on scale without clamping to MAX_FONT_SIZE
+        finalFontSize = (this.fontSize * scale).clamp(MIN_FONT_SIZE, double.infinity);
+        
+        // Calculate new position to maintain center alignment
+        final center = oldBounds.center;
+        final newWidth = oldBounds.width * scale;
+        final newHeight = oldBounds.height * scale;
+        finalPosition = Offset(
+          center.dx - newWidth / 2,
+          center.dy - newHeight / 2
+        );
+      }
+    } else if (fontSize != null) {
+      // If only fontSize is provided, only clamp to minimum
+      finalFontSize = fontSize.clamp(MIN_FONT_SIZE, double.infinity);
     }
 
     return TextElement(
       id: id ?? this.id,
-      position: position ?? this.position,
+      position: finalPosition,
       isSelected: isSelected ?? this.isSelected,
       text: text ?? this.text,
       color: color ?? this.color,
@@ -103,7 +132,7 @@ class TextElement extends DrawingElement {
       fontWeight: fontWeight ?? this.fontWeight,
       fontStyle: fontStyle ?? this.fontStyle,
       textAlign: textAlign ?? this.textAlign,
-      rotation: rotation ?? this.rotation, // Pass rotation
+      rotation: rotation ?? this.rotation,
     );
   }
 

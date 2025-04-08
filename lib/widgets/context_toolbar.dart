@@ -451,50 +451,7 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
               (e) => e.id == elementId && e.type == ElementType.text
             ) as TextElement?;
             if (textElement != null) {
-              double currentSize = textElement.fontSize;
-              showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  double tempSize = currentSize;
-                  return AlertDialog(
-                    title: const Text('Font Size'),
-                    content: StatefulBuilder(
-                      builder: (context, setState) {
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('${tempSize.round()}', style: TextStyle(fontSize: 24)),
-                            Slider(
-                              value: tempSize,
-                              min: 8.0,
-                              max: 72.0,
-                              divisions: 64,
-                              onChanged: (value) {
-                                setState(() {
-                                  tempSize = value;
-                                });
-                              },
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('CANCEL'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          provider.updateSelectedElementProperties({'fontSize': tempSize});
-                          Navigator.pop(context);
-                        },
-                        child: const Text('APPLY'),
-                      ),
-                    ],
-                  );
-                },
-              );
+              _showFontSizeDialog(context, provider, textElement.fontSize);
             }
           },
       ),
@@ -543,6 +500,57 @@ class _ContextToolbarState extends State<ContextToolbar> with SingleTickerProvid
           ],
         );
       },
+    );
+  }
+
+  void _showFontSizeDialog(BuildContext context, DrawingProvider provider, double currentSize) {
+    // Calculate the dynamic maximum value - use the larger of the default max or current size
+    final double dynamicMax = math.max(TextElement.MAX_FONT_SIZE, currentSize);
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        double tempSize = currentSize;
+        return AlertDialog(
+          title: const Text('Adjust Font Size'),
+          content: StatefulBuilder(
+            builder: (context, setState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${tempSize.toStringAsFixed(1)}px', style: const TextStyle(fontSize: 24)),
+                  Slider(
+                    value: tempSize,
+                    min: TextElement.MIN_FONT_SIZE,
+                    max: dynamicMax, // Use the dynamic maximum
+                    divisions: ((dynamicMax - TextElement.MIN_FONT_SIZE) / 2).round(), // Adjust divisions based on range
+                    onChanged: (value) {
+                      setState(() {
+                        tempSize = value;
+                      });
+                    },
+                  ),
+                ],
+              );
+            }
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('OK'),
+              onPressed: () {
+                if (tempSize != currentSize) {
+                  provider.updateSelectedElementProperties({'fontSize': tempSize});
+                }
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      }
     );
   }
 
