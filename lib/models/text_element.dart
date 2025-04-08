@@ -111,10 +111,41 @@ class TextElement extends DrawingElement {
         final center = oldBounds.center;
         final newWidth = oldBounds.width * scale;
         final newHeight = oldBounds.height * scale;
-        finalPosition = Offset(
-          center.dx - newWidth / 2,
-          center.dy - newHeight / 2
-        );
+        
+        // If the element is rotated, we need to adjust the position calculation
+        if (rotation != null && rotation != 0) {
+          // Normalize rotation to be between 0 and 2π
+          double normalizedRotation = rotation % (2 * math.pi);
+          if (normalizedRotation < 0) normalizedRotation += 2 * math.pi;
+          
+          // Calculate the rotated center point
+          // For angles close to 180 degrees or its multiples, use a different approach
+          if ((normalizedRotation - math.pi).abs() < 0.01 || 
+              (normalizedRotation - 2 * math.pi).abs() < 0.01) {
+            // For angles close to 180 degrees, simply invert the coordinates
+            finalPosition = Offset(
+              center.dx - newWidth / 2,
+              center.dy - newHeight / 2
+            );
+          } else {
+            // For other angles, use the standard rotation formula
+            final rotatedCenter = Offset(
+              center.dx * math.cos(normalizedRotation) - center.dy * math.sin(normalizedRotation),
+              center.dx * math.sin(normalizedRotation) + center.dy * math.cos(normalizedRotation)
+            );
+            
+            finalPosition = Offset(
+              rotatedCenter.dx - newWidth / 2,
+              rotatedCenter.dy - newHeight / 2
+            );
+          }
+        } else {
+          // If not rotated, use the standard center alignment
+          finalPosition = Offset(
+            center.dx - newWidth / 2,
+            center.dy - newHeight / 2
+          );
+        }
       }
     } else if (fontSize != null) {
       // If only fontSize is provided, only clamp to minimum

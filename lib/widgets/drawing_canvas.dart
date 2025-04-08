@@ -69,8 +69,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
   
   ResizeHandleType? _hitTestHandles(DrawingElement element, Offset point, double inverseScale) {
-    final double handleSize = 8.0 * inverseScale;
-    final double touchPadding = handleSize * 0.5;
+    // Increase the base handle size for better visibility
+    final double handleSize = 10.0 * inverseScale;
+    
+    // Increase the touch padding significantly to make handles easier to grab
+    // This creates a larger invisible touch area around each handle
+    final double touchPadding = handleSize * 2.0;
+    
     final handles = calculateHandles(element.bounds, handleSize);
     for (var entry in handles.entries) {
       if (entry.value.inflate(touchPadding).contains(point)) return entry.key;
@@ -884,33 +889,31 @@ class SelectionPainter extends CustomPainter {
     final Rect bounds = element.bounds;
     if (bounds.isEmpty) return;
 
-    final double handleSize = 8.0 * inverseScale;
+    // Increase the base handle size for better visibility
+    final double handleSize = 12.0 * inverseScale;
+    
+    // Create a more visible handle style
     final handlePaintFill = Paint()..color = Colors.white;
     final handlePaintStroke = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 * inverseScale;
+      ..strokeWidth = 2.0 * inverseScale; // Thicker stroke for better visibility
 
     // Calculate and draw handles
     final handles = calculateHandles(bounds, handleSize);
-    // Draw only corner and edge handles here    
-    final handlesToDraw = [
-      ResizeHandleType.topLeft,
-      ResizeHandleType.topRight,
-      ResizeHandleType.bottomLeft,
-      ResizeHandleType.bottomRight,
-      ResizeHandleType.topMiddle,
-      ResizeHandleType.bottomMiddle,
-      ResizeHandleType.middleLeft,
-      ResizeHandleType.middleRight,
-    ];
-
-    for (var handleType in handlesToDraw) {
-      final handleRect = handles[handleType];
-      if (handleRect != null) {
-        canvas.drawOval(handleRect, handlePaintFill);
-        canvas.drawOval(handleRect, handlePaintStroke);
-      }
+    
+    // Draw each handle with a larger touch target
+    for (var entry in handles.entries) {
+      if (entry.key == ResizeHandleType.rotate) continue; // Skip rotation handle
+      
+      final handleRect = entry.value;
+      
+      // Draw a larger invisible touch area (for hit testing)
+      final touchArea = handleRect.inflate(handleSize);
+      
+      // Draw the visible handle
+      canvas.drawRect(handleRect, handlePaintFill);
+      canvas.drawRect(handleRect, handlePaintStroke);
     }
   }
 
@@ -918,30 +921,44 @@ class SelectionPainter extends CustomPainter {
     final Rect bounds = element.bounds;
     if (bounds.isEmpty) return;
 
-    final double handleSize = 8.0 * inverseScale;
+    // Make rotation handle larger and more visible
+    final double handleSize = 14.0 * inverseScale;
+    
+    // Create a distinct style for the rotation handle
     final handlePaintFill = Paint()..color = Colors.white;
     final handlePaintStroke = Paint()
-      ..color = Colors.green // Use a different color for rotation handle
+      ..color = Colors.blue
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 * inverseScale;
-      
+      ..strokeWidth = 2.0 * inverseScale;
+    
+    // Calculate rotation handle position
     final handles = calculateHandles(bounds, handleSize);
-    final rotationRect = handles[ResizeHandleType.rotate];
-    if (rotationRect != null) {
-      // Draw line from top center of bounds to rotation handle
-      final center = bounds.center;
-      final topCenter = Offset(center.dx, bounds.top);
-      final handleCenter = rotationRect.center;
-      canvas.drawLine(
-        topCenter,
-        handleCenter,
-        handlePaintStroke
-      );
-      
-      // Draw circular rotation handle
-      canvas.drawCircle(handleCenter, handleSize * 0.6, handlePaintFill);
-      canvas.drawCircle(handleCenter, handleSize * 0.6, handlePaintStroke);
-    }
+    final rotateHandle = handles[ResizeHandleType.rotate];
+    if (rotateHandle == null) return;
+    
+    // Draw a larger invisible touch area for the rotation handle
+    final touchArea = rotateHandle.inflate(handleSize);
+    
+    // Draw the visible rotation handle
+    canvas.drawRect(rotateHandle, handlePaintFill);
+    canvas.drawRect(rotateHandle, handlePaintStroke);
+    
+    // Add a rotation indicator arrow
+    final center = rotateHandle.center;
+    final arrowPaint = Paint()
+      ..color = Colors.blue
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0 * inverseScale;
+    
+    // Draw a circular arrow around the handle
+    final arrowRadius = handleSize * 0.8;
+    canvas.drawArc(
+      Rect.fromCenter(center: center, width: arrowRadius * 2, height: arrowRadius * 2),
+      -math.pi / 4, // Start at -45 degrees
+      math.pi * 1.5, // Draw 270 degrees
+      false,
+      arrowPaint
+    );
   }
 
   @override
