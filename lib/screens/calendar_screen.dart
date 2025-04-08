@@ -9,6 +9,11 @@ import '../providers/calendar_provider.dart';
 import '../providers/drawing_provider.dart';
 import '../models/calendar_entry.dart';
 import '../models/element.dart';
+import '../models/note_element.dart';
+import '../models/image_element.dart';
+import '../models/pen_element.dart';
+import '../models/text_element.dart';
+import '../models/gif_element.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -211,6 +216,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
   
   Widget _buildCanvasCard(BuildContext context, CalendarEntry entry) {
+    // Check if thumbnail file exists
+    bool thumbnailExists = false;
+    File? thumbnailFile; // Store the file object
+
+    if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty) {
+      thumbnailFile = File(entry.thumbnailPath!);
+      try {
+        thumbnailExists = thumbnailFile.existsSync();
+      } catch (e) {
+         thumbnailExists = false; // Assume not exists if error occurs
+      }
+    }
+
     return Card(
       elevation: 4,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -241,24 +259,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
           ),
           
-          // Canvas thumbnail
-          if (entry.thumbnailPath != null)
-            Container(
-              height: 150,
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12.0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8.0),
-                child: GestureDetector(
-                  onTap: () => _openCanvas(context, entry),
-                  child: Image.file(
-                    File(entry.thumbnailPath!),
-                    fit: BoxFit.contain,
-                  ),
-                ),
+          // Canvas thumbnail or fallback
+          Container(
+            height: 150,
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Added vertical padding
+            color: Colors.grey[100], // Background for the container
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: GestureDetector(
+                onTap: () => _openCanvas(context, entry),
+                child: (thumbnailFile != null && thumbnailExists)
+                    ? Image.file(
+                        thumbnailFile, // Use the File object
+                        key: ValueKey(entry.thumbnailPath), // Add key for potential updates
+                        fit: BoxFit.contain, // Contain ensures aspect ratio is kept
+                        errorBuilder: (context, error, stackTrace) {
+                          // Return the fallback widget on error
+                          return _buildThumbnailFallback(context, entry, error.toString());
+                        },
+                      )
+                    : _buildThumbnailFallback(context, entry, thumbnailExists ? 'File exists but Image.file not attempted' : 'File does not exist or path is null'),
               ),
             ),
-            
+          ),
+
           // Action buttons
           OverflowBar(
             alignment: MainAxisAlignment.end,
@@ -287,6 +312,104 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  // Helper method to build a fallback thumbnail - now accepts an error message
+  Widget _buildThumbnailFallback(BuildContext context, CalendarEntry entry, String reason) {
+    // Count element types for the fallback display
+    int noteCount = 0;
+    int imageCount = 0;
+    int penCount = 0;
+    int textCount = 0;
+    int gifCount = 0;
+    
+    for (var element in entry.elements) {
+      if (element is NoteElement) noteCount++;
+      else if (element is ImageElement) imageCount++;
+      else if (element is PenElement) penCount++;
+      else if (element is TextElement) textCount++;
+      else if (element is GifElement) gifCount++;
+    }
+    
+    return Container(
+      color: Colors.grey[200],
+      child: Center(
+        child: Padding( // Add padding around the fallback content
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.broken_image_outlined, // Use a different icon
+                size: 32,
+                color: Colors.grey[500], // Slightly darker grey
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Preview Unavailable', // More descriptive text
+                style: TextStyle(
+                  color: Colors.grey[700], // Darker text
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '(${entry.elements.length} elements)', // Show element count
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 11,
+                ),
+              ),
+              // Optional: Show the reason if needed for debugging
+              // Text(
+              //   reason,
+              //   style: TextStyle(color: Colors.red[300], fontSize: 9),
+              //   textAlign: TextAlign.center,
+              //   maxLines: 2,
+              //   overflow: TextOverflow.ellipsis,
+              // ),
+              // Element type chips (keep as is)
+              if (noteCount > 0 || imageCount > 0 || penCount > 0 || textCount > 0 || gifCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6.0),
+                  child: Wrap( // Use Wrap for better layout if many types exist
+                    spacing: 4.0,
+                    runSpacing: 4.0,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      if (noteCount > 0) _buildElementTypeChip(context, 'Notes', noteCount),
+                      if (imageCount > 0) _buildElementTypeChip(context, 'Images', imageCount),
+                      if (penCount > 0) _buildElementTypeChip(context, 'Drawings', penCount),
+                      if (textCount > 0) _buildElementTypeChip(context, 'Text', textCount),
+                      if (gifCount > 0) _buildElementTypeChip(context, 'GIFs', gifCount),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildElementTypeChip(BuildContext context, String label, int count) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.grey[300],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$label: $count',
+        style: TextStyle(
+          color: Colors.grey[700],
+          fontSize: 10,
+        ),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,6 +15,7 @@ import '../models/text_element.dart';
 import '../models/image_element.dart';
 import '../models/video_element.dart';
 import '../models/gif_element.dart'; // Add this import
+import '../models/note_element.dart'; // Add import for NoteElement
 import 'drawing_provider.dart';
 
 class CalendarProvider extends ChangeNotifier {
@@ -86,11 +88,14 @@ class CalendarProvider extends ChangeNotifier {
       return null;
     }
     
+    print('Saving drawing with ${drawingProvider.elements.length} elements');
+    
     // Check if we should update an existing entry
     if (updateExisting && _selectedEntryId != null) {
       // Update the existing entry
       final index = _entries.indexWhere((entry) => entry.id == _selectedEntryId);
       if (index >= 0) {
+        print('Updating existing entry: $_selectedEntryId');
         await updateEntry(_selectedEntryId!, drawingProvider, title: title);
         return _entries[index];
       }
@@ -98,10 +103,13 @@ class CalendarProvider extends ChangeNotifier {
     
     // Otherwise, create a new entry
     // Generate a thumbnail from the current drawing
+    print('Generating thumbnail for new entry');
     final thumbnailPath = await _generateThumbnail(drawingProvider.elements);
+    print('Thumbnail generated: $thumbnailPath');
     
     // Clone all elements to ensure we store a snapshot
     final elementsCopy = drawingProvider.elements.map((e) => e.clone()).toList();
+    print('Cloned ${elementsCopy.length} elements');
     
     // Generate a unique ID using UUID
     final uniqueId = const Uuid().v4();
@@ -132,13 +140,21 @@ class CalendarProvider extends ChangeNotifier {
   // Update an existing entry
   Future<void> updateEntry(String entryId, DrawingProvider drawingProvider, {String? title}) async {
     final index = _entries.indexWhere((entry) => entry.id == entryId);
-    if (index < 0) return;
+    if (index < 0) {
+      print('Cannot update entry: Entry with ID $entryId not found');
+      return;
+    }
+    
+    print('Updating entry $entryId with ${drawingProvider.elements.length} elements');
     
     // Generate a thumbnail from the current drawing
+    print('Generating thumbnail for updated entry');
     final thumbnailPath = await _generateThumbnail(drawingProvider.elements);
+    print('Thumbnail generated: $thumbnailPath');
     
     // Clone all elements to ensure we store a snapshot
     final elementsCopy = drawingProvider.elements.map((e) => e.clone()).toList();
+    print('Cloned ${elementsCopy.length} elements');
     
     // Update the entry
     _entries[index] = _entries[index].copyWith(
@@ -177,85 +193,192 @@ class CalendarProvider extends ChangeNotifier {
   
   // Generate a thumbnail image from the current drawing
   Future<String?> _generateThumbnail(List<DrawingElement> elements) async {
-    if (elements.isEmpty) return null;
-    
+    if (elements.isEmpty) {
+      return null;
+    }
+
+    final uniqueId = const Uuid().v4(); // Unique ID for this thumbnail attempt
+
     try {
-      // Create a recorder to capture the drawing
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
-      
-      // Define a fixed size for the thumbnail (adjust as needed)
-      const thumbnailSize = Size(320, 240);
-      
-      // Calculate bounds of all elements
-      Rect? boundingRect;
-      for (var element in elements) {
-        if (boundingRect == null) {
-          boundingRect = element.bounds;
-        } else {
-          boundingRect = boundingRect.expandToInclude(element.bounds);
-        }
-      }
-      
-      // If we have elements but no valid bounds, return null
-      if (boundingRect == null || boundingRect.isEmpty) {
-        return null;
-      }
-      
-      // Apply a scale to fit everything into the thumbnail
-      final scaleX = thumbnailSize.width / boundingRect.width;
-      final scaleY = thumbnailSize.height / boundingRect.height;
-      final scale = scaleX < scaleY ? scaleX : scaleY;
-      
-      // Translate to center the content
-      final offsetX = -boundingRect.left + (thumbnailSize.width / scale - boundingRect.width) / 2;
-      final offsetY = -boundingRect.top + (thumbnailSize.height / scale - boundingRect.height) / 2;
-      
-      // Set up transform
-      canvas.translate(offsetX, offsetY);
-      canvas.scale(scale);
-      
+
+      const thumbnailSize = Size(320, 240); // Fixed size for thumbnail
+
       // Fill background
       canvas.drawRect(
-        Rect.fromLTWH(boundingRect.left, boundingRect.top, boundingRect.width, boundingRect.height),
-        Paint()..color = Colors.white
+        Rect.fromLTWH(0, 0, thumbnailSize.width, thumbnailSize.height),
+        Paint()..color = Colors.white,
       );
-      
-      // Render each element
+
+      // Calculate bounds
+      Rect? boundingRect;
       for (var element in elements) {
-        // Skip video elements in thumbnails (they're too complex)
-        if (element is VideoElement) {
-          continue;
+        try {
+           if (boundingRect == null) {
+             boundingRect = element.bounds;
+           } else {
+             boundingRect = boundingRect.expandToInclude(element.bounds);
+           }
+        } catch (e) {
         }
-        element.render(canvas, inverseScale: 1.0);
       }
-      
-      // End recording and convert to image
+
+      if (boundingRect == null || boundingRect.isEmpty || !boundingRect.isFinite) {
+         // Draw a fallback message directly onto the canvas
+        final textPainter = TextPainter(
+          text: const TextSpan(text: 'Preview Error', style: TextStyle(color: Colors.red, fontSize: 16)),
+          textDirection: ui.TextDirection.ltr,
+        )..layout();
+        textPainter.paint(canvas, Offset((thumbnailSize.width - textPainter.width) / 2, (thumbnailSize.height - textPainter.height) / 2));
+
+      } else {
+
+        // Calculate scale and offset
+        final scaleX = boundingRect.width > 0 ? thumbnailSize.width / boundingRect.width : 1.0;
+        final scaleY = boundingRect.height > 0 ? thumbnailSize.height / boundingRect.height : 1.0;
+        final scale = math.min(scaleX, scaleY) * 0.9; // Use 90% space
+
+        // Center the content
+        final scaledWidth = boundingRect.width * scale;
+        final scaledHeight = boundingRect.height * scale;
+        final translateX = (thumbnailSize.width - scaledWidth) / 2 - (boundingRect.left * scale);
+        final translateY = (thumbnailSize.height - scaledHeight) / 2 - (boundingRect.top * scale);
+
+        // Apply transform
+        canvas.save(); // Save state before transform
+        canvas.translate(translateX, translateY);
+        canvas.scale(scale);
+
+        // Render elements
+        for (var element in elements) {
+          try {
+            // Skip video elements in thumbnails
+            if (element is VideoElement) {
+              // Optionally draw a placeholder for video
+              canvas.drawRect(element.bounds, Paint()..color = Colors.grey[300]!);
+              // Remove const from TextSpan
+              final textPainter = TextPainter(text: TextSpan(text: 'VIDEO', style: TextStyle(color: Colors.black54, fontSize: 10 / scale)), textDirection: ui.TextDirection.ltr)..layout();
+              textPainter.paint(canvas, element.bounds.center.translate(-textPainter.width / 2, -textPainter.height / 2));
+              continue;
+            }
+
+            canvas.save(); // Save state for this element's transform/rendering
+
+            // Apply element's rotation if any
+            if (element.rotation != 0) {
+              final center = element.bounds.center;
+              canvas.translate(center.dx, center.dy);
+              canvas.rotate(element.rotation);
+              canvas.translate(-center.dx, -center.dy);
+            }
+
+            // Render based on type (simplified rendering for complex types if needed)
+            if (element is ImageElement) {
+               if (element.image != null) {
+                 // Use drawImageRect for better control if needed, or just drawImage
+                 canvas.drawImageRect(
+                   element.image!,
+                   Rect.fromLTWH(0, 0, element.image!.width.toDouble(), element.image!.height.toDouble()),
+                   element.bounds,
+                   Paint()..filterQuality = FilterQuality.low, // Use lower quality for thumbs
+                 );
+               } else {
+                 canvas.drawRect(element.bounds, Paint()..color = Colors.grey[200]!); // Placeholder
+               }
+            } else if (element is GifElement) {
+               // Draw placeholder for GIF, attempting first frame is too complex/slow here
+               canvas.drawRect(element.bounds, Paint()..color = Colors.purple[100]!);
+               // Remove const from TextSpan
+               final textPainter = TextPainter(text: TextSpan(text: 'GIF', style: TextStyle(color: Colors.purple, fontSize: 10 / scale)), textDirection: ui.TextDirection.ltr)..layout();
+               textPainter.paint(canvas, element.bounds.center.translate(-textPainter.width / 2, -textPainter.height / 2));
+            } else if (element is NoteElement) {
+               // Simplified Note Rendering for Thumbnail
+               final rect = element.bounds;
+               final Paint backgroundPaint = Paint()..color = element.backgroundColor;
+               canvas.drawRRect(
+                 // Remove const from Radius.circular
+                 RRect.fromRectAndRadius(rect, Radius.circular(4.0 / scale)), // Scale radius
+                 backgroundPaint
+               );
+               // Maybe just draw title or an icon, full text rendering is slow
+               final textPainter = TextPainter(
+                 text: TextSpan(text: element.title?.isNotEmpty == true ? element.title : 'Note', style: TextStyle(color: Colors.black87, fontSize: 8 / scale, fontWeight: FontWeight.bold)),
+                 textDirection: ui.TextDirection.ltr,
+                 maxLines: 1,
+                 ellipsis: '...',
+               )..layout(maxWidth: rect.width - (8.0 / scale));
+               textPainter.paint(canvas, rect.topLeft.translate(4.0 / scale, 4.0 / scale));
+               if (element.isPinned) {
+                  final pinPaint = Paint()..color = Colors.red.shade700;
+                  canvas.drawCircle(rect.topRight.translate(-6 / scale, 6 / scale), 3 / scale, pinPaint);
+               }
+            }
+            else {
+              // Use standard render for Pen, Text etc.
+              element.render(canvas, inverseScale: 1.0 / scale); // Pass inverse scale if needed by render
+            }
+
+            canvas.restore(); // Restore state after rendering element
+
+          } catch (e, s) {
+            // Draw an error placeholder for this specific element
+             try {
+               canvas.drawRect(element.bounds, Paint()..color = Colors.red.withOpacity(0.3));
+               // Remove const from TextSpan
+               final textPainter = TextPainter(text: TextSpan(text: 'ERR', style: TextStyle(color: Colors.red, fontSize: 8 / scale)), textDirection: ui.TextDirection.ltr)..layout();
+               textPainter.paint(canvas, element.bounds.center.translate(-textPainter.width / 2, -textPainter.height / 2));
+             } catch (placeholderError) {
+             }
+             // Ensure canvas state is restored even if rendering fails
+             canvas.restore(); // Make sure restore is called if save was called
+          }
+        }
+        canvas.restore(); // Restore state after transform
+      }
+
+
+      // End recording and generate image
       final picture = recorder.endRecording();
+
       final img = await picture.toImage(
         thumbnailSize.width.toInt(),
         thumbnailSize.height.toInt(),
       );
+
       final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose(); // Dispose image object
+      picture.dispose(); // Dispose picture object
       final buffer = byteData?.buffer.asUint8List();
-      
-      if (buffer == null) {
+
+      if (buffer == null || buffer.isEmpty) {
         return null;
       }
-      
+
       // Save the image to a file
       final directory = await getApplicationDocumentsDirectory();
       final thumbnailDir = Directory('${directory.path}/thumbnails');
-      await thumbnailDir.create(recursive: true);
-      
-      // Generate a unique filename for the thumbnail
-      final filename = '${const Uuid().v4()}.png';
+      if (!await thumbnailDir.exists()) {
+         await thumbnailDir.create(recursive: true);
+      }
+
+      final filename = '$uniqueId.png'; // Use unique ID for filename
       final file = File('${thumbnailDir.path}/$filename');
       await file.writeAsBytes(buffer);
-      
-      return file.path;
+
+      // Verify file existence and size immediately after writing
+      if (await file.exists()) {
+        final fileSize = await file.length();
+        if (fileSize > 0) {
+          return file.path; // Success
+        } else {
+          await file.delete(); // Delete empty file
+          return null;
+        }
+      } else {
+        return null;
+      }
     } catch (e, s) {
-      print('Error generating thumbnail: $e\n$s');
       return null;
     }
   }
@@ -372,58 +495,79 @@ class CalendarProvider extends ChangeNotifier {
     String id = entryMap['id'];
     String? thumbnailPath = entryMap['thumbnailPath'];
     String title = entryMap['title'] ?? '';
-    DateTime createdAt = entryMap.containsKey('createdAt') 
-        ? DateTime.parse(entryMap['createdAt']) 
-        : DateTime.now();
-    
+    DateTime createdAt = entryMap.containsKey('createdAt')
+        ? DateTime.parse(entryMap['createdAt'])
+        : DateTime.now(); // Consider defaulting to 'date' if createdAt is missing?
+
     // Process elements
     List<DrawingElement> elements = [];
-    if (entryMap['elements'] != null) {
-      for (var elementMap in entryMap['elements']) {
+    if (entryMap['elements'] != null && entryMap['elements'] is List) {
+       final List<dynamic> elementMaps = entryMap['elements'];
+       int elementIndex = 0;
+      for (var elementMapJson in elementMaps) {
+         // Ensure elementMapJson is a Map<String, dynamic>
+         if (elementMapJson is! Map<String, dynamic>) {
+            elementIndex++;
+            continue;
+         }
+         Map<String, dynamic> elementMap = elementMapJson;
+
         try {
           String elementType = elementMap['elementType'] ?? 'unknown';
           DrawingElement? element;
-          
+
           // Create the appropriate element type
           switch (elementType) {
             case 'pen':
               element = PenElement.fromMap(elementMap);
               break;
-              
+
             case 'text':
               element = TextElement.fromMap(elementMap);
               break;
-              
+
             case 'image':
               // For images, we need to load the image data
               element = await _recreateImageElement(elementMap);
+              if (element == null) {
+              }
               break;
-              
+
             case 'video':
               // For videos, we need to create a video controller
               element = await _recreateVideoElement(elementMap);
+               if (element == null) {
+              }
               break;
-              
+
             case 'gif':
               // For GIFs, we need to reconstruct the element with the URLs
               element = _recreateGifElement(elementMap);
+               if (element == null) {
+              }
               break;
-              
+
+            case 'note':
+              // For notes, we need to reconstruct the note element
+              element = NoteElement.fromMap(elementMap);
+              break;
+
             default:
-              print('Unknown element type: $elementType');
               break;
           }
-          
+
           // Add the element if successfully created
           if (element != null) {
             elements.add(element);
           }
-        } catch (e) {
-          print('Error recreating element: $e');
+        } catch (e, s) {
+          // Continue parsing other elements
         }
+        elementIndex++;
       }
+    } else {
     }
-    
+
     // Create and return the entry
     return CalendarEntry(
       date: date,
@@ -437,6 +581,7 @@ class CalendarProvider extends ChangeNotifier {
   
   // Helper to recreate an ImageElement from serialized data
   Future<ImageElement?> _recreateImageElement(Map<String, dynamic> map) async {
+    final String elementId = map['id'] ?? 'unknown_image';
     try {
       // Parse position
       final posMap = map['position'];
@@ -454,33 +599,39 @@ class CalendarProvider extends ChangeNotifier {
       
       // Get image path
       final String? imagePath = map['imagePath'];
-      
-      if (imagePath != null) {
-        // Load image from file
+
+      if (imagePath != null && imagePath.isNotEmpty) {
         File imageFile = File(imagePath);
         if (await imageFile.exists()) {
           Uint8List bytes = await imageFile.readAsBytes();
+          if (bytes.isEmpty) {
+             return null;
+          }
           final codec = await ui.instantiateImageCodec(bytes);
           final frame = await codec.getNextFrame();
           final image = frame.image;
-          
+
           // Create and return the ImageElement
           return ImageElement(
             id: map['id'],
             position: position,
             isSelected: map['isSelected'] ?? false,
-            image: image,
+            image: image, // The actual ui.Image object
             size: size,
-            imagePath: imagePath,
+            imagePath: imagePath, // Store the path too
+            rotation: map['rotation'] ?? 0.0, // Load rotation
+            // Load brightness and contrast using the correct parameters (added in next step)
+            brightness: map['brightness'] ?? 0.0,
+            contrast: map['contrast'] ?? 0.0,
           );
+        } else {
         }
+      } else {
       }
-      
+
       // If we can't load the image, return null
-      print('Could not load image from path: $imagePath');
       return null;
-    } catch (e) {
-      print('Error recreating image element: $e');
+    } catch (e, s) {
       return null;
     }
   }

@@ -5,6 +5,7 @@ import 'text_element.dart';
 import 'image_element.dart';
 import 'video_element.dart';
 import 'gif_element.dart'; // Add this import
+import 'note_element.dart'; // Add this import
 
 class CalendarEntry {
   final DateTime date;
@@ -95,6 +96,9 @@ class CalendarEntry {
               break;
             case 'gif':
               parsedElements.add(GifElement.fromMap(elementMap)); // Add handling for GIF elements
+              break;
+            case 'note':
+              parsedElements.add(NoteElement.fromMap(elementMap)); // Add handling for Note elements
               break;
             default:
               print('Unknown element type: $elementType');
