@@ -312,54 +312,69 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final date = dayData['date'] as DateTime;
     final entry = dayData['entry'] as CalendarEntry?;
     
+    // Determine if the date is in the future (ignore time part)
+    final now = DateTime.now();
+    final todayDate = DateTime(now.year, now.month, now.day);
+    final cellDate = DateTime(date.year, date.month, date.day);
+    final bool isFuture = cellDate.isAfter(todayDate);
+
     return GestureDetector(
-      onTap: () => _handleDayTap(date, entry),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade200),
-          color: Colors.white,
-        ),
-        padding: const EdgeInsets.all(1.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Day number and weekday
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0, top: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    day.toString(),
-                    style: TextStyle(
-                      fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                      fontSize: 18,
-                      color: isToday ? Colors.black : Colors.black87,
-                    ),
-                  ),
-                  Text(
-                    DateFormat('EEE').format(date).toLowerCase(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                      fontWeight: isToday ? FontWeight.w500 : FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
+      // Disable onTap for future dates
+      onTap: isFuture ? null : () => _handleDayTap(date, entry),
+      child: Opacity(
+        // Reduce opacity for future dates to grey them out
+        opacity: isFuture ? 0.5 : 1.0, 
+        child: Container(
+          decoration: BoxDecoration(
+            // Highlight today with a thicker border
+            border: Border.all(
+              color: isToday ? Colors.grey.shade500 : Colors.grey.shade200,
+              width: isToday ? 2.0 : 1.0,
             ),
-            
-            // Canvas thumbnail or empty space
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.all(1.0),
-                child: entry != null 
-                    ? _buildThumbnail(context, entry) 
-                    : Container(),
+            color: Colors.white,
+          ),
+          padding: const EdgeInsets.all(1.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Day number and weekday
+              Padding(
+                padding: const EdgeInsets.only(left: 8.0, top: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      day.toString(),
+                      style: TextStyle(
+                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                        fontSize: 18,
+                        color: isToday ? Colors.black : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      DateFormat('EEE').format(date).toLowerCase(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                        fontWeight: isToday ? FontWeight.w500 : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              
+              // Canvas thumbnail or empty space
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(1.0),
+                  child: entry != null 
+                      ? _buildThumbnail(context, entry) 
+                      : Container(),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
