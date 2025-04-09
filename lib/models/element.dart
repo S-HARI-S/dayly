@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 // Enum defining the types of elements that can be drawn or interacted with
 enum ElementType {
-  select, // Special type for the selection tool itself
+  none,    // No active tool - default interaction mode
+  select,  // Keep for backward compatibility but will be phased out
   pen,
   text,
   rectangle, // Placeholder

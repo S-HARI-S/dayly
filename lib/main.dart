@@ -221,12 +221,7 @@ class _DrawingBoardState extends State<DrawingBoard> {
                       mainAxisSize: MainAxisSize.min, // Fit content
                       children: [
                         // --- Tools ---
-                        ToolButton(
-                          icon: Icons.pan_tool_alt_outlined, // Or Icons.mouse
-                          isSelected: drawingProvider.currentTool == ElementType.select,
-                          onPressed: () => drawingProvider.setTool(ElementType.select),
-                          tooltip: 'Select / Move / Resize',
-                        ),
+                        // Only show actual content creation tools
                         ToolButton(
                           icon: Icons.edit,
                           isSelected: drawingProvider.currentTool == ElementType.pen,
@@ -239,11 +234,6 @@ class _DrawingBoardState extends State<DrawingBoard> {
                           onPressed: () => drawingProvider.setTool(ElementType.text),
                           tooltip: 'Text Tool',
                         ),
-                        // Add buttons for shapes when implemented
-                        // ToolButton(... ElementType.rectangle ...),
-                        // ToolButton(... ElementType.circle ...),
-                        // ToolButton(... ElementType.arrow ...),
-
                         const Divider(height: 16), // Separator
 
                         // --- Media ---

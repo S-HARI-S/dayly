@@ -11,12 +11,15 @@ import 'dart:math' as math;
 
 import '../providers/drawing_provider.dart';
 import '../models/element.dart';
+import '../models/text_element.dart';
 import '../models/video_element.dart';
 import '../models/gif_element.dart';
 import '../models/handles.dart';
+import '../models/pen_element.dart';  // Add missing import for PenElement
+import '../models/image_element.dart'; // Add missing import for ImageElement
 import '../widgets/context_toolbar.dart';
 import '../widgets/bottom_floating_button.dart';
-import '../models/note_element.dart'; // Add missing import for NoteElement
+import '../models/note_element.dart'; // Fixed missing quote
 
 class DrawingCanvas extends StatefulWidget {
   final TransformationController transformationController;
@@ -36,15 +39,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   // --- State & Config ---
   int _activePointers = 0; 
   Timer? _moveDelayTimer; 
+  Timer? _longPressTimer; // Add timer for tap-and-hold selection
   bool _isMovingElement = false;
   Offset? _potentialInteractionStartPosition; 
   Offset? _lastInteractionPosition;
   bool _isResizingElement = false; 
-  bool _isRotatingElement = false; // Add state for rotation
+  bool _isRotatingElement = false;
+  bool _isSelectionInProgress = false; // Track if we're in selection mode
   ResizeHandleType? _draggedHandle;
   DrawingElement? _elementBeingInteractedWith;
-  static const Duration longPressDuration = Duration(milliseconds: 200);
+  static const Duration longPressDuration = Duration(milliseconds: 350); // Slightly longer for clearer intent
   static const double moveCancelThreshold = 10.0;
+  static const double animationScale = 1.05; // Scale factor for selection pop effect
 
   // Add state for toolbar height
   double _toolbarHeight = 0.0;
@@ -55,6 +61,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   // Track last tap time for double-tap detection
   DateTime? _lastTapTime;
   
+  // Add a flag to track whether we're currently using a drawing tool
+  bool get _isDrawingToolActive {
+    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
+    return drawingProvider.currentTool != ElementType.select && 
+           drawingProvider.currentTool != ElementType.none;
+  }
+
   // Helper method to get transformed canvas position
   Offset _getTransformedCanvasPosition(Offset globalPosition) {
     final RenderBox box = context.findRenderObject() as RenderBox;
@@ -67,15 +80,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _moveDelayTimer?.cancel(); 
     _moveDelayTimer = null; 
   }
+
+  void _cancelLongPressTimer() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+  }
   
   ResizeHandleType? _hitTestHandles(DrawingElement element, Offset point, double inverseScale) {
-    // Increase the base handle size for better visibility
     final double handleSize = 10.0 * inverseScale;
-    
-    // Increase the touch padding significantly to make handles easier to grab
-    // This creates a larger invisible touch area around each handle
     final double touchPadding = handleSize * 2.0;
-    
     final handles = calculateHandles(element.bounds, handleSize);
     for (var entry in handles.entries) {
       if (entry.value.inflate(touchPadding).contains(point)) return entry.key;
@@ -83,7 +96,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return null;
   }
 
-  // Helper method to calculate angle between two points relative to center
   double _calculateAngle(Offset center, Offset point) {
     return math.atan2(point.dy - center.dy, point.dx - center.dx);
   }
@@ -91,6 +103,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   @override
   void dispose() { 
     _cancelMoveTimer();
+    _cancelLongPressTimer();
     super.dispose(); 
   }
 
@@ -106,15 +119,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         current: provider.currentElement
       ),
       shouldRebuild: (previous, next) {
-        // More robust check: rebuild if list instance changes OR content/order changes
         final elementsChanged = !identical(previous.elements, next.elements) ||
                                 !listEquals(previous.elements, next.elements);
         final selectionChanged = !listEquals(previous.selectedElementIds, next.selectedElementIds);
         final currentChanged = previous.current != next.current;
-        // Optional: Log which part changed
-        // if (elementsChanged) print("Canvas rebuild: elements changed");
-        // if (selectionChanged) print("Canvas rebuild: selection changed");
-        // if (currentChanged) print("Canvas rebuild: current element changed");
         return elementsChanged || selectionChanged || currentChanged;
       },
       builder: (context, data, child) {
@@ -123,28 +131,26 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         final currentDrawingElement = data.current;
         final transform = widget.transformationController.value;
 
-        // --- Add Logging Here ---
-        print("--- DrawingCanvas Rendering (${currentElements.length} elements) ---");
-        // --- End Logging ---
-
         return Stack(
           fit: StackFit.expand,
           children: [
-            // The main canvas interaction listener
             Listener(
               onPointerDown: (PointerDownEvent event) {
                 if (!mounted) return;
                 final Offset localPosition = event.localPosition;
 
                 _cancelMoveTimer();
+                _cancelLongPressTimer();
+                
                 setState(() { 
                   _activePointers++; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
-                  _isRotatingElement = false; // Reset rotation state
+                  _isRotatingElement = false;
+                  _isSelectionInProgress = false;
                   _draggedHandle = null; 
                   _elementBeingInteractedWith = null; 
-                  _startRotationAngle = null; // Reset rotation angle
+                  _startRotationAngle = null;
                 });
                 
                 _potentialInteractionStartPosition = localPosition; 
@@ -154,22 +160,58 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 HapticFeedback.lightImpact();
                 final currentTool = drawingProvider.currentTool;
 
-                if (currentTool == ElementType.select) {
+                // Direct handling for pen tool to ensure drawing starts immediately
+                if (currentTool == ElementType.pen) {
+                  // Start drawing immediately
+                  drawingProvider.startDrawing(localPosition);
+                } else if (currentTool != ElementType.none) {
+                  DrawingElement? hitElement = currentElements.lastWhereOrNull(
+                    (el) => el.containsPoint(localPosition)
+                  );
+
+                  if (hitElement != null) {
+                    _longPressTimer = Timer(longPressDuration, () {
+                      if (!mounted) return;
+                      
+                      setState(() { 
+                        _isSelectionInProgress = true;
+                        _elementBeingInteractedWith = hitElement;
+                      });
+                      
+                      HapticFeedback.mediumImpact();
+                      drawingProvider.selectElement(hitElement);
+                      drawingProvider.showContextToolbar = true;
+                      
+                      _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
+                        if (!mounted || _elementBeingInteractedWith == null) return;
+                        
+                        setState(() { 
+                          _isMovingElement = true; 
+                        });
+                        
+                        drawingProvider.startPotentialMove();
+                      });
+                    });
+                  } else if (currentTool == ElementType.text) {
+                    _showTextDialog(context, drawingProvider, localPosition);
+                  }
+                } else {
                   bool actionTaken = false;
-                  // 1. Hit Handle?
+                  
                   if (selectedIds.length == 1) {
                     final selectedElement = currentElements.firstWhereOrNull(
                       (el) => el.id == selectedIds.first
                     );
+                    
                     if (selectedElement != null) {
                       final double scale = transform.getMaxScaleOnAxis();
                       final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
                       _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
+                      
                       if (_draggedHandle != null) {
                         setState(() { 
                           if (_draggedHandle == ResizeHandleType.rotate) {
                             _isRotatingElement = true;
-                            // Store initial rotation angle between element center and pointer
                             final elementCenter = selectedElement.bounds.center;
                             _startRotationAngle = _calculateAngle(elementCenter, localPosition) - selectedElement.rotation;
                           } else {
@@ -185,59 +227,53 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                         }
                         
                         HapticFeedback.mediumImpact();
-                        print("Handle HIT: $_draggedHandle on ${selectedElement.id}"); 
                         actionTaken = true;
                       }
                     }
                   }
                   
-                  // 2. Hit Element Body?
                   if (!actionTaken) {
                     DrawingElement? hitElement = currentElements.lastWhereOrNull(
                       (el) => el.containsPoint(localPosition)
                     );
+                    
                     if (hitElement != null) {
-                      // Always show toolbar when element is hit
-                      drawingProvider.showContextToolbar = true;
-                      drawingProvider.showContextToolbarForElement(hitElement.id);
-                      
-                      // Now handle selection
-                      if (!(selectedIds.length == 1 && selectedIds.first == hitElement.id)) {
-                        drawingProvider.selectElementAt(localPosition);
-                      } else {
-                        // Force notify even if selection didn't change to ensure toolbar shows
-                        drawingProvider.notifyListeners();
-                      }
-                      
-                      setState(() { 
+                      setState(() {
                         _elementBeingInteractedWith = hitElement;
                       });
-                      drawingProvider.startPotentialMove(); 
-                      actionTaken = true;
-                      print("Element HIT: ${hitElement.id}. Showing toolbar.");
                       
-                      // Continue with move timer
-                      _moveDelayTimer = Timer(longPressDuration, () {
+                      _longPressTimer = Timer(longPressDuration, () {
                         if (!mounted || _elementBeingInteractedWith == null) return;
-                        print("** Move Timer Fired! Enabling Drag for ${_elementBeingInteractedWith?.id} **");
+                        
                         setState(() { 
-                          _isMovingElement = true; 
-                        }); 
-                        HapticFeedback.mediumImpact();
+                          _isSelectionInProgress = true;
+                        });
+                        
+                        drawingProvider.clearSelection(notify: false);
+                        drawingProvider.selectElement(hitElement);
+                        drawingProvider.showContextToolbar = true;
+                        
+                        HapticFeedback.mediumImpact(); 
+                        
+                        _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
+                          if (!mounted || _elementBeingInteractedWith == null) return;
+                          
+                          setState(() { 
+                            _isMovingElement = true; 
+                          });
+                          
+                          drawingProvider.startPotentialMove();
+                        });
                       });
+                      
+                      actionTaken = true;
                     }
                   }
                   
-                  // 3. Tapped Empty Space?
                   if (!actionTaken) {
-                    print("Tap empty space - clearing selection.");
                     drawingProvider.clearSelection();
-                    // Explicitly hide toolbar when tapping empty space
                     drawingProvider.showContextToolbar = false;
                   }
-                }
-                else if (currentTool == ElementType.pen) { 
-                  drawingProvider.startDrawing(localPosition);
                 }
               },
 
@@ -245,28 +281,32 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 if (!mounted || _activePointers != 1 || widget.isInteracting) return;
                 final Offset localPosition = event.localPosition;
                 
-                // Remove this check to ensure we process ALL movement events
-                // This was causing the jankiness by skipping updates when pointer barely moved
-                
                 final delta = (_lastInteractionPosition != null) 
                     ? localPosition - _lastInteractionPosition! 
                     : Offset.zero;
                 final currentTool = drawingProvider.currentTool;
 
-                if (currentTool == ElementType.select) {
-                  // Handle rotation
+                // Check if we're currently drawing with the pen tool
+                if (currentTool == ElementType.pen && drawingProvider.currentElement != null) {
+                  // If we're already drawing, keep updating the drawing
+                  drawingProvider.updateDrawing(localPosition);
+                  _cancelLongPressTimer(); // Cancel any pending selection if we're actively drawing
+                } else if (_longPressTimer?.isActive ?? false) {
+                  final movementDistance = (_potentialInteractionStartPosition != null) 
+                      ? (localPosition - _potentialInteractionStartPosition!).distance 
+                      : 0.0;
+                  
+                  if (movementDistance > moveCancelThreshold) {
+                    _cancelLongPressTimer();
+                  }
+                } else if (_isSelectionInProgress || _isMovingElement || _isResizingElement || _isRotatingElement) {
                   if (_isRotatingElement && _elementBeingInteractedWith != null && _startRotationAngle != null) {
                     final elementCenter = _elementBeingInteractedWith!.bounds.center;
                     final currentAngle = _calculateAngle(elementCenter, localPosition);
                     final newRotation = currentAngle - _startRotationAngle!;
                     
-                    // IMPORTANT: Use direct update instead of Future.microtask
-                    // Use rotateSelectedImmediate instead of rotateSelected for immediate visual feedback
-                    // This ensures bounding box and element rotation stay in sync
                     drawingProvider.rotateSelectedImmediate(_elementBeingInteractedWith!.id, newRotation);
-                  }
-                  // Handle other interactions (resizing, moving)
-                  else if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
+                  } else if (_isResizingElement && _draggedHandle != null && _elementBeingInteractedWith != null) {
                     drawingProvider.resizeSelected(
                       _elementBeingInteractedWith!.id, 
                       _draggedHandle!, 
@@ -274,243 +314,231 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       localPosition, 
                       _potentialInteractionStartPosition ?? localPosition
                     );
-                  } 
-                  // Handle moving
-                  else if (_elementBeingInteractedWith != null) {
-                    // Cancel move timer if pointer moves beyond threshold before timer fires
-                    if (_moveDelayTimer?.isActive ?? false) { 
-                      if ((localPosition - _potentialInteractionStartPosition!).distance > moveCancelThreshold) { 
-                        print("Move cancelled before timer fired."); 
-                        _cancelMoveTimer(); 
-                        
-                        // IMMEDIATE ENABLE MOVE! Don't wait for the timer (faster response)
-                        setState(() { 
-                          _isMovingElement = true; 
-                        });
-                        HapticFeedback.lightImpact();
-                      }
-                    }
-                    // Only move if the timer has fired (_isMovingElement is true)
-                    if (_isMovingElement) {
-                      // IMPORTANT: Use microtask to ensure move happens on next frame
-                      // This helps avoid the UI thread being blocked during drag operations
-                      Future.microtask(() {
-                        if (mounted) {
-                          drawingProvider.moveSelected(delta);
-                        }
+                  } else if (_isMovingElement && _elementBeingInteractedWith != null) {
+                    if (_moveDelayTimer?.isActive ?? false) {
+                      _cancelMoveTimer();
+                      setState(() {
+                        _isMovingElement = true;
                       });
+                      drawingProvider.startPotentialMove();
                     }
+                    
+                    Future.microtask(() {
+                      if (mounted) {
+                        drawingProvider.moveSelected(delta);
+                      }
+                    });
                   }
-                } else if (currentTool == ElementType.pen) {
-                  drawingProvider.updateDrawing(localPosition);
                 }
+                
                 _lastInteractionPosition = localPosition;
               },
 
               onPointerUp: (PointerUpEvent event) {
                 if (!mounted) return;
-                _cancelMoveTimer(); // Always cancel timer on up
+                
+                _cancelMoveTimer();
+                _cancelLongPressTimer();
+                
                 final Offset upPosition = event.localPosition;
                 final tapPosition = _potentialInteractionStartPosition ?? upPosition;
                 final currentTool = drawingProvider.currentTool;
                 bool wasMoving = _isMovingElement; 
                 bool wasResizing = _isResizingElement;
-                bool wasRotating = _isRotatingElement; // Track rotation state
+                bool wasRotating = _isRotatingElement;
+                bool wasSelecting = _isSelectionInProgress;
                 DrawingElement? interactedElement = _elementBeingInteractedWith;
 
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
-                  _isRotatingElement = false; // Reset rotation flag
+                  _isRotatingElement = false;
+                  _isSelectionInProgress = false;
                   _draggedHandle = null; 
                   _elementBeingInteractedWith = null;
-                  _startRotationAngle = null; // Reset rotation angle
+                  _startRotationAngle = null;
                 });
                 _lastInteractionPosition = null; 
                 _potentialInteractionStartPosition = null;
 
                 if (_activePointers == 0 && !widget.isInteracting) {
-                  if (currentTool == ElementType.select) {
-                    if (wasResizing) { 
-                      print("End Resize"); 
-                      drawingProvider.endPotentialResize(); 
-                    }
-                    else if (wasMoving) { 
-                      print("End Move"); 
-                      drawingProvider.endPotentialMove(); 
-                    }
-                    else if (wasRotating) { 
-                      print("End Rotation"); 
-                      drawingProvider.endPotentialRotation(); 
-                    }
-                    // Check if it was a tap on an element (not a drag or resize)
-                    else if (interactedElement != null) {
-                      print("Tap on element: ${interactedElement.id}");
-                      // If the tapped element was already selected, consider it a tap action
-                      if (selectedIds.contains(interactedElement.id)) {
-                         if (interactedElement is VideoElement) {
-                            drawingProvider.toggleVideoPlayback(interactedElement.id);
-                         } else if (interactedElement is NoteElement) {
-                            // Check for double-tap by measuring time since last tap
-                            final now = DateTime.now();
-                            if (_lastTapTime != null && 
-                                now.difference(_lastTapTime!).inMilliseconds < 500) {
-                              // Show edit dialog on double tap
-                              _showNoteEditDialog(context, drawingProvider, interactedElement);
-                            }
-                            _lastTapTime = now;
-                         }
-                         // Add other tap actions for other element types if needed
+                  // Specifically check if a pen stroke is active and needs to be finalized
+                  if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
+                    drawingProvider.endDrawing();
+                    return; // Early return to avoid other handlers
+                  }
+                  
+                  if (wasResizing) { 
+                    drawingProvider.endPotentialResize();
+                    drawingProvider.clearSelection();
+                  } else if (wasMoving) { 
+                    drawingProvider.endPotentialMove();
+                    drawingProvider.clearSelection();
+                  } else if (wasRotating) { 
+                    drawingProvider.endPotentialRotation();
+                    drawingProvider.clearSelection(); 
+                  } else if (interactedElement != null && !wasSelecting) {
+                    if (selectedIds.contains(interactedElement.id)) {
+                      if (interactedElement is VideoElement) {
+                        drawingProvider.toggleVideoPlayback(interactedElement.id);
+                        drawingProvider.clearSelection();
+                      } else if (interactedElement is NoteElement) {
+                        final now = DateTime.now();
+                        if (_lastTapTime != null && now.difference(_lastTapTime!).inMilliseconds < 500) {
+                          _showNoteEditDialog(context, drawingProvider, interactedElement);
+                        }
+                        _lastTapTime = now;
+                        drawingProvider.clearSelection();
+                      } else if (interactedElement is TextElement) {
+                        _showTextDialog(context, drawingProvider, tapPosition, existingText: interactedElement);
+                        drawingProvider.clearSelection();
+                      } else {
+                        drawingProvider.clearSelection();
                       }
+                    } else {
+                      drawingProvider.selectElement(interactedElement);
+                      drawingProvider.showContextToolbar = true;
+                      Future.delayed(Duration(milliseconds: 100), () {
+                        drawingProvider.clearSelection();
+                      });
                     }
-                    else { 
-                      print("Tap on empty space (after potential selection clear on down).");
-                    }
-                  }
-                  else if (currentTool == ElementType.pen) { 
-                    drawingProvider.endDrawing(); 
-                  }
-                  else if (currentTool == ElementType.text) { 
-                    _showTextDialog(context, drawingProvider, tapPosition);
                   }
                 }
               },
 
               onPointerCancel: (PointerCancelEvent event) {
                 if (!mounted) return;
-                print("Pointer Cancelled");
                 _cancelMoveTimer(); 
+                _cancelLongPressTimer();
                 bool wasMoving = _isMovingElement;
                 bool wasResizing = _isResizingElement;
-                bool wasRotating = _isRotatingElement; // Track rotation state
-                
-                // Decide how to handle cancel: discard or finalize based on state
+                bool wasRotating = _isRotatingElement;
                 if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
                   drawingProvider.discardDrawing();
-                }
-                else if (wasResizing) { 
+                } else if (wasResizing) { 
                   drawingProvider.endPotentialResize(); 
-                }
-                else if (wasMoving) { 
+                } else if (wasMoving) { 
                   drawingProvider.endPotentialMove(); 
-                }
-                else if (wasRotating) { 
+                } else if (wasRotating) { 
                   drawingProvider.endPotentialRotation();
                 }
-                
-                // Reset state regardless
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
-                  _isRotatingElement = false; // Reset rotation flag
+                  _isRotatingElement = false;
+                  _isSelectionInProgress = false;
                   _draggedHandle = null; 
                   _elementBeingInteractedWith = null; 
-                  _startRotationAngle = null; // Reset rotation angle
+                  _startRotationAngle = null;
                 });
                 _lastInteractionPosition = null;
                 _potentialInteractionStartPosition = null;
               },
-              behavior: HitTestBehavior.opaque, // Capture all events within bounds
+              behavior: HitTestBehavior.opaque,
               child: Stack(
                 children: [
-                  // Render elements individually. Lower index = bottom layer.
                   ...List.generate(currentElements.length, (index) {
                     final element = currentElements[index];
-                    // --- Add Logging Here ---
-                    print("  Rendering Index $index: \\${element.id} (\\${element.type})");
-                    // --- End Logging ---
+                    final bool isSelected = selectedIds.contains(element.id);
+                    final bool isBeingInteracted = _elementBeingInteractedWith?.id == element.id;
+                    final bool shouldAnimate = isSelected && isBeingInteracted && _isSelectionInProgress;
                     List<Widget> elementWidgets = [];
-                    // 1. Render the element content
+                    Widget elementWidget;
                     if (element is GifElement) {
                       final bounds = element.bounds;
-                      elementWidgets.add(
-                        Positioned(
-                          left: bounds.left,
-                          top: bounds.top,
-                          width: bounds.width,
-                          height: bounds.height,
-                          child: Transform.rotate(
-                            angle: element.rotation,
-                            child: Image.network(
-                              element.gifUrl,
-                              fit: BoxFit.cover,
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  color: Colors.grey.withOpacity(0.3),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      value: loadingProgress.expectedTotalBytes != null
-                                          ? loadingProgress.cumulativeBytesLoaded / 
-                                              loadingProgress.expectedTotalBytes!
-                                          : null,
-                                    ),
+                      elementWidget = Positioned(
+                        left: bounds.left,
+                        top: bounds.top,
+                        width: bounds.width,
+                        height: bounds.height,
+                        child: Transform.rotate(
+                          angle: element.rotation,
+                          child: Image.network(
+                            element.gifUrl,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                color: Colors.grey.withOpacity(0.3),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    value: loadingProgress.expectedTotalBytes != null
+                                        ? loadingProgress.cumulativeBytesLoaded / 
+                                            loadingProgress.expectedTotalBytes!
+                                        : null,
                                   ),
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) {
-                                print("Error loading GIF: $error");
-                                return Container(
-                                  color: Colors.grey.withOpacity(0.3),
-                                  child: const Center(
-                                    child: Text("Error loading GIF", 
-                                      style: TextStyle(color: Colors.red)),
-                                  ),
-                                );
-                              },
-                            ),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: Colors.grey.withOpacity(0.3),
+                                child: const Center(
+                                  child: Text("Error loading GIF", 
+                                    style: TextStyle(color: Colors.red)),
+                                ),
+                              );
+                            },
                           ),
                         ),
                       );
                     } else if (element is VideoElement) {
                       final bounds = element.bounds;
                       if (!element.controller.value.isInitialized) {
-                        elementWidgets.add(
-                          Positioned(
-                            left: bounds.left,
-                            top: bounds.top,
-                            width: bounds.width,
-                            height: bounds.height,
-                            child: Container(
-                                color: Colors.black,
-                                child: const Center(child: CircularProgressIndicator())),
-                          ),
+                        elementWidget = Positioned(
+                          left: bounds.left,
+                          top: bounds.top,
+                          width: bounds.width,
+                          height: bounds.height,
+                          child: Container(
+                              color: Colors.black,
+                              child: const Center(child: CircularProgressIndicator())),
                         );
                       } else {
-                        elementWidgets.add(
-                          Positioned(
-                            left: bounds.left,
-                            top: bounds.top,
-                            width: bounds.width,
-                            height: bounds.height,
-                            child: IgnorePointer(
-                              child: VideoPlayer(element.controller),
-                            ),
+                        elementWidget = Positioned(
+                          left: bounds.left,
+                          top: bounds.top,
+                          width: bounds.width,
+                          height: bounds.height,
+                          child: IgnorePointer(
+                            child: VideoPlayer(element.controller),
                           ),
                         );
                       }
                     } else {
-                      // Use CustomPaint for other types (Pen, Text, Image)
-                      elementWidgets.add(
-                        RepaintBoundary(
-                          child: CustomPaint(
-                            painter: ElementPainter(element: element, currentTransform: transform),
-                            size: Size.infinite, 
-                          ),
+                      elementWidget = RepaintBoundary(
+                        child: CustomPaint(
+                          painter: ElementPainter(element: element, currentTransform: transform),
+                          size: Size.infinite,
                         ),
                       );
                     }
-                    // 2. Render selection handles on top if selected
-                    if (selectedIds.contains(element.id)) {
+                    elementWidgets.add(
+                      shouldAnimate
+                        ? TweenAnimationBuilder<double>(
+                            tween: Tween<double>(begin: 1.0, end: animationScale),
+                            duration: const Duration(milliseconds: 100),
+                            builder: (context, scale, child) {
+                              return Transform.scale(
+                                scale: scale,
+                                alignment: Alignment.center,
+                                child: child,
+                              );
+                            },
+                            child: elementWidget,
+                          )
+                        : elementWidget,
+                    );
+                    if (isSelected) {
                       elementWidgets.add(
-                         RepaintBoundary(
-                           child: CustomPaint(
-                             painter: SelectionPainter(element: element, currentTransform: transform),
-                             size: Size.infinite,
-                           ),
-                         ),
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: SelectionPainter(element: element, currentTransform: transform),
+                            size: Size.infinite,
+                          ),
+                        ),
                       );
                     }
                     return Stack(
@@ -518,7 +546,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       children: elementWidgets
                     );
                   }),
-                  // Current drawing element (e.g., pen stroke) always on top during creation
                   if (currentDrawingElement != null)
                      RepaintBoundary(
                        child: CustomPaint(
@@ -529,7 +556,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 ],
               ),
             ),
-            // Make sure the toolbar is on top and properly positioned
             Positioned(
               left: 0,
               right: 0,
@@ -539,15 +565,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 child: Consumer<DrawingProvider>(
                   builder: (context, provider, _) {
                     final isVisible = provider.showContextToolbar;
-                    print("Rendering toolbar with visibility: $isVisible");
-                    
-                    // Check if there are any selected elements
-                    if (provider.selectedElementIds.isEmpty) {
-                      print("No selected elements for toolbar");
-                    } else {
-                      print("Selected elements: ${provider.selectedElementIds}");
-                    }
-                    
                     return ContextToolbar(
                       key: const ValueKey('contextToolbar'),
                       isVisible: isVisible,
@@ -563,49 +580,24 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 ),
               ),
             ),
-            // Add the "+" button with animation based on toolbar height
             Consumer<DrawingProvider>(
               builder: (context, provider, _) {
-                // Calculate bottom offset based on toolbar visibility
                 final toolbarOffset = provider.showContextToolbar ? _toolbarHeight : 0.0;
-                
                 return BottomFloatingButton(
                   bottomOffset: toolbarOffset,
                   onPressed: () {
-                    // Show a menu for creating new elements
                     _showAddElementMenu(context);
                   },
                   child: const Icon(Icons.add),
                 );
               },
             ),
-            // Debug overlay - REMOVE IN PRODUCTION
-            if (false) // Set to false to disable the debug overlay
-              Positioned(
-                top: 100,
-                right: 20,
-                child: Consumer<DrawingProvider>(
-                  builder: (context, provider, _) {
-                    return Container(
-                      padding: const EdgeInsets.all(8),
-                      color: Colors.black.withOpacity(0.5),
-                      child: Text(
-                        "Toolbar visible: ${provider.showContextToolbar}\n"
-                        "Selected: ${provider.selectedElementIds.length}\n"
-                        "Height: $_toolbarHeight",
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    );
-                  },
-                ),
-              ),
           ],
         );
       },
     );
   }
 
-  // Method to show a menu for adding new elements
   void _showAddElementMenu(BuildContext context) {
     final provider = Provider.of<DrawingProvider>(context, listen: false);
     final RenderBox button = context.findRenderObject() as RenderBox;
@@ -617,12 +609,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       ),
       Offset.zero & overlay.size,
     );
-
     showMenu(
       context: context,
       position: position,
       items: [
-        // Make the sticky note option more prominent by placing it at the top
         PopupMenuItem(
           child: const ListTile(
             leading: Icon(Icons.sticky_note_2, color: Colors.amber),
@@ -631,7 +621,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           ),
           onTap: () {
             Future.delayed(const Duration(milliseconds: 10), () {
-              // Get the canvas center position
               final center = _getCanvasCenter(provider, context);
               provider.createStickyNote(center);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -646,7 +635,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             title: Text('Add Image'),
           ),
           onTap: () {
-            // Add slight delay to allow menu to close
             Future.delayed(const Duration(milliseconds: 10), () {
               provider.addImageFromGallery(context, widget.transformationController);
             });
@@ -682,9 +670,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           onTap: () {
             Future.delayed(const Duration(milliseconds: 10), () {
               provider.setTool(ElementType.text);
-              // Focus on center of screen for text input
               final center = _getCanvasCenter(provider, context);
               _showTextDialog(context, provider, center);
+              // Text dialog will handle tool reset
             });
           },
         ),
@@ -692,7 +680,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
   }
 
-  // Helper method to get canvas center
   Offset _getCanvasCenter(DrawingProvider provider, BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     final Offset screenCenter = Offset(screenSize.width / 2, screenSize.height / 2);
@@ -700,48 +687,60 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       final Matrix4 inverseMatrix = Matrix4.inverted(widget.transformationController.value);
       return MatrixUtils.transformPoint(inverseMatrix, screenCenter);
     } catch (e) {
-      return const Offset(50000, 50000); // Default center if transformation fails
+      return const Offset(50000, 50000);
     }
   }
 
-  // Text Dialog implementation
-  void _showTextDialog(BuildContext context, DrawingProvider provider, Offset position) {
-    final controller = TextEditingController();
+  void _showTextDialog(BuildContext context, DrawingProvider provider, Offset position, {TextElement? existingText}) {
+    final controller = TextEditingController(text: existingText?.text ?? '');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Enter Text"),
+        title: Text(existingText != null ? "Edit Text" : "Enter Text"),
         content: TextField(
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(hintText: "Type here..."),
           onSubmitted: (t) {
             if (t.trim().isNotEmpty) {
-              provider.addTextElement(t, position);
+              if (existingText != null) {
+                provider.updateSelectedElementProperties({'text': t});
+                provider.clearSelection();
+              } else {
+                provider.addTextElement(t, position);
+              }
               Navigator.of(context).pop();
             }
           },
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () {
+              Navigator.of(context).pop();
+              provider.resetTool();
+              provider.clearSelection();
+            },
             child: const Text("Cancel"),
           ),
           TextButton(
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
-                provider.addTextElement(controller.text, position);
+                if (existingText != null) {
+                  provider.updateSelectedElementProperties({'text': controller.text});
+                  provider.clearSelection();
+                } else {
+                  provider.addTextElement(controller.text, position);
+                }
                 Navigator.of(context).pop();
               }
             },
-            child: const Text("Add"),
+            child: Text(existingText != null ? "Update" : "Add"),
           ),
         ],
       ),
     );
   }
 
-  // Note Edit Dialog implementation
   void _showNoteEditDialog(BuildContext context, DrawingProvider provider, NoteElement note) {
     final titleController = TextEditingController(text: note.title);
     final contentController = TextEditingController(text: note.content);
@@ -751,11 +750,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Edit Note'),
-          content: SizedBox(
+          content: Container(
             width: 300,
-            height: 250,
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 TextField(
                   controller: titleController,
@@ -766,7 +766,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
-                Expanded(
+                Flexible(
                   child: TextField(
                     controller: contentController,
                     decoration: const InputDecoration(
@@ -793,6 +793,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   contentController.text
                 );
                 Navigator.of(context).pop();
+                provider.clearSelection();
               },
               child: const Text('Save'),
             ),
@@ -803,7 +804,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 }
 
-// --- ElementPainter ---
 class ElementPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
@@ -815,33 +815,25 @@ class ElementPainter extends CustomPainter {
     final double scale = currentTransform.getMaxScaleOnAxis();
     final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
     
-    // Save the current canvas state
     canvas.save();
     
-    // If the element has rotation, apply it
     if (element.rotation != 0) {
-      // Rotate around the center of the element's bounds
       final center = element.bounds.center;
       canvas.translate(center.dx, center.dy);
       canvas.rotate(element.rotation);
       canvas.translate(-center.dx, -center.dy);
     }
     
-    // Render the element
     element.render(canvas, inverseScale: inverseScale);
-    
-    // Restore the canvas to its original state
-    canvas.restore();    
+    canvas.restore();
   }
   
   @override
   bool shouldRepaint(covariant ElementPainter oldDelegate) {
-    // Repaint if element or transform changes
     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
-} 
+}
 
-// --- SelectionPainter ---
 class SelectionPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
@@ -857,113 +849,52 @@ class SelectionPainter extends CustomPainter {
     
     canvas.save();
     
-    // Draw selection rectangle without rotation first
-    final Paint selectionPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 * inverseScale;
-    
-    // If the element has rotation, apply it
     if (element.rotation != 0) {
-      // Rotate around the center of the element's bounds
       final center = element.bounds.center;
       canvas.translate(center.dx, center.dy);
       canvas.rotate(element.rotation);
       canvas.translate(-center.dx, -center.dy);
     }
     
-    // Draw the selection box
-    canvas.drawRect(bounds.inflate(1.5 * inverseScale), selectionPaint);
-    
-    // Draw selection handles (these should not be rotated with the element)
-    _drawSelectionHandles(canvas, element, inverseScale);
-    
-    // Restore canvas state before drawing rotation handle
-    canvas.restore();
-    
-    // Now draw rotation handle (which shouldn't be rotated)
-    _drawRotationHandle(canvas, element, inverseScale);
-  }
-
-  void _drawSelectionHandles(Canvas canvas, DrawingElement element, double inverseScale) {
-    final Rect bounds = element.bounds;
-    if (bounds.isEmpty) return;
-
-    // Increase the base handle size for better visibility
-    final double handleSize = 12.0 * inverseScale;
-    
-    // Create a more visible handle style
-    final handlePaintFill = Paint()..color = Colors.white;
-    final handlePaintStroke = Paint()
-      ..color = Colors.blue
+    final Paint outlinePaint = Paint()
+      ..color = Colors.blue.withOpacity(0.6)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 * inverseScale; // Thicker stroke for better visibility
-
-    // Calculate and draw handles
-    final handles = calculateHandles(bounds, handleSize);
+      ..strokeWidth = 1.5 * inverseScale;
     
-    // Draw each handle with a larger touch target
-    for (var entry in handles.entries) {
-      if (entry.key == ResizeHandleType.rotate) continue; // Skip rotation handle
-      
-      final handleRect = entry.value;
-      
-      // Draw a larger invisible touch area (for hit testing)
-      final touchArea = handleRect.inflate(handleSize);
-      
-      // Draw the visible handle
-      canvas.drawRect(handleRect, handlePaintFill);
-      canvas.drawRect(handleRect, handlePaintStroke);
+    if (element is PenElement) {
+      final pen = element as PenElement;
+      if (pen.points.length >= 2) {
+        final path = Path();
+        path.moveTo(pen.points.first.dx, pen.points.first.dy);
+        for (int i = 1; i < pen.points.length; i++) {
+          path.lineTo(pen.points[i].dx, pen.points[i].dy);
+        }
+        outlinePaint.strokeWidth = (pen.strokeWidth + 2) * inverseScale;
+        canvas.drawPath(path, outlinePaint);
+      }
+    } else if (element is TextElement || element is NoteElement) {
+      final rect = bounds.inflate(1 * inverseScale);
+      final radius = Radius.circular(8 * inverseScale);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, radius),
+        outlinePaint
+      );
+    } else if (element is ImageElement || element is VideoElement || element is GifElement) {
+      final rect = bounds.inflate(1 * inverseScale);
+      final radius = Radius.circular(4 * inverseScale);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, radius),
+        outlinePaint
+      );
+    } else {
+      canvas.drawRect(bounds.inflate(1 * inverseScale), outlinePaint);
     }
-  }
-
-  void _drawRotationHandle(Canvas canvas, DrawingElement element, double inverseScale) {
-    final Rect bounds = element.bounds;
-    if (bounds.isEmpty) return;
-
-    // Make rotation handle larger and more visible
-    final double handleSize = 14.0 * inverseScale;
     
-    // Create a distinct style for the rotation handle
-    final handlePaintFill = Paint()..color = Colors.white;
-    final handlePaintStroke = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 * inverseScale;
-    
-    // Calculate rotation handle position
-    final handles = calculateHandles(bounds, handleSize);
-    final rotateHandle = handles[ResizeHandleType.rotate];
-    if (rotateHandle == null) return;
-    
-    // Draw a larger invisible touch area for the rotation handle
-    final touchArea = rotateHandle.inflate(handleSize);
-    
-    // Draw the visible rotation handle
-    canvas.drawRect(rotateHandle, handlePaintFill);
-    canvas.drawRect(rotateHandle, handlePaintStroke);
-    
-    // Add a rotation indicator arrow
-    final center = rotateHandle.center;
-    final arrowPaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 * inverseScale;
-    
-    // Draw a circular arrow around the handle
-    final arrowRadius = handleSize * 0.8;
-    canvas.drawArc(
-      Rect.fromCenter(center: center, width: arrowRadius * 2, height: arrowRadius * 2),
-      -math.pi / 4, // Start at -45 degrees
-      math.pi * 1.5, // Draw 270 degrees
-      false,
-      arrowPaint
-    );
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant SelectionPainter oldDelegate) {
-    // Repaint if element or transform changes
     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
 }
