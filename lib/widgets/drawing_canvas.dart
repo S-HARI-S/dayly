@@ -38,19 +38,28 @@ class DrawingCanvas extends StatefulWidget {
 class _DrawingCanvasState extends State<DrawingCanvas> {
   // --- State & Config ---
   int _activePointers = 0; 
+  Map<int, Offset> _pointerPositions = {}; // Add map to track multiple pointers
   Timer? _moveDelayTimer; 
-  Timer? _longPressTimer; // Add timer for tap-and-hold selection
+  Timer? _longPressTimer; 
   bool _isMovingElement = false;
   Offset? _potentialInteractionStartPosition; 
   Offset? _lastInteractionPosition;
   bool _isResizingElement = false; 
   bool _isRotatingElement = false;
-  bool _isSelectionInProgress = false; // Track if we're in selection mode
+  bool _isSelectionInProgress = false; 
+  bool _isMultiTouchInteraction = false; // Add flag for multi-touch interaction
   ResizeHandleType? _draggedHandle;
   DrawingElement? _elementBeingInteractedWith;
-  static const Duration longPressDuration = Duration(milliseconds: 350); // Slightly longer for clearer intent
+  
+  // Initial values for multi-touch tracking
+  double _initialScale = 1.0;
+  double _initialRotation = 0.0;
+  double _lastScale = 1.0;
+  Offset? _midPoint;
+  
+  static const Duration longPressDuration = Duration(milliseconds: 350);
   static const double moveCancelThreshold = 10.0;
-  static const double animationScale = 1.05; // Scale factor for selection pop effect
+  static const double animationScale = 1.05;
 
   // Add state for toolbar height
   double _toolbarHeight = 0.0;
@@ -100,6 +109,37 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return math.atan2(point.dy - center.dy, point.dx - center.dx);
   }
 
+  // Helper to calculate distance between points (for scaling)
+  double _getDistance(Offset point1, Offset point2) {
+    final dx = point1.dx - point2.dx;
+    final dy = point1.dy - point2.dy;
+    return math.sqrt(dx * dx + dy * dy);
+  }
+  
+  // Helper to calculate rotation angle between two points
+  double _getRotationAngle() {
+    if (_pointerPositions.length < 2) return 0.0;
+    
+    final pointers = _pointerPositions.values.toList();
+    final point1 = pointers[0];
+    final point2 = pointers[1];
+    
+    return math.atan2(point2.dy - point1.dy, point2.dx - point1.dx);
+  }
+  
+  // Helper to calculate midpoint between two pointers
+  Offset _getMidpoint() {
+    if (_pointerPositions.length < 2) {
+      return _pointerPositions.values.first;
+    }
+    
+    final pointers = _pointerPositions.values.toList();
+    return Offset(
+      (pointers[0].dx + pointers[1].dx) / 2,
+      (pointers[0].dy + pointers[1].dy) / 2,
+    );
+  }
+
   @override
   void dispose() { 
     _cancelMoveTimer();
@@ -138,122 +178,60 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerDown: (PointerDownEvent event) {
                 if (!mounted) return;
                 final Offset localPosition = event.localPosition;
-
-                _cancelMoveTimer();
-                _cancelLongPressTimer();
+                
+                // Track this pointer
+                _pointerPositions[event.pointer] = localPosition;
                 
                 setState(() { 
                   _activePointers++; 
-                  _isMovingElement = false; 
-                  _isResizingElement = false; 
-                  _isRotatingElement = false;
-                  _isSelectionInProgress = false;
-                  _draggedHandle = null; 
-                  _elementBeingInteractedWith = null; 
-                  _startRotationAngle = null;
                 });
-                
-                _potentialInteractionStartPosition = localPosition; 
-                _lastInteractionPosition = localPosition;
-                
-                if (_activePointers > 1 || widget.isInteracting) return;
-                HapticFeedback.lightImpact();
-                final currentTool = drawingProvider.currentTool;
 
-                // Direct handling for pen tool to ensure drawing starts immediately
-                if (currentTool == ElementType.pen) {
-                  // Start drawing immediately
-                  drawingProvider.startDrawing(localPosition);
-                } else if (currentTool != ElementType.none) {
-                  DrawingElement? hitElement = currentElements.lastWhereOrNull(
-                    (el) => el.containsPoint(localPosition)
-                  );
+                if (_activePointers == 1) {
+                  // First pointer logic - similar to existing code
+                  _cancelMoveTimer();
+                  _cancelLongPressTimer();
+                  
+                  setState(() { 
+                    _isMovingElement = false; 
+                    _isResizingElement = false; 
+                    _isRotatingElement = false;
+                    _isSelectionInProgress = false;
+                    _isMultiTouchInteraction = false;
+                    _draggedHandle = null; 
+                    _elementBeingInteractedWith = null; 
+                    _startRotationAngle = null;
+                  });
+                  
+                  _potentialInteractionStartPosition = localPosition; 
+                  _lastInteractionPosition = localPosition;
+                  
+                  if (widget.isInteracting) return;
+                  HapticFeedback.lightImpact();
+                  
+                  // Process first touch similarly to current implementation
+                  final currentTool = drawingProvider.currentTool;
 
-                  if (hitElement != null) {
-                    _longPressTimer = Timer(longPressDuration, () {
-                      if (!mounted) return;
-                      
-                      setState(() { 
-                        _isSelectionInProgress = true;
-                        _elementBeingInteractedWith = hitElement;
-                      });
-                      
-                      HapticFeedback.mediumImpact();
-                      drawingProvider.selectElement(hitElement);
-                      drawingProvider.showContextToolbar = true;
-                      
-                      _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
-                        if (!mounted || _elementBeingInteractedWith == null) return;
-                        
-                        setState(() { 
-                          _isMovingElement = true; 
-                        });
-                        
-                        drawingProvider.startPotentialMove();
-                      });
-                    });
-                  } else if (currentTool == ElementType.text) {
-                    _showTextDialog(context, drawingProvider, localPosition);
-                  }
-                } else {
-                  bool actionTaken = false;
-                  
-                  if (selectedIds.length == 1) {
-                    final selectedElement = currentElements.firstWhereOrNull(
-                      (el) => el.id == selectedIds.first
-                    );
-                    
-                    if (selectedElement != null) {
-                      final double scale = transform.getMaxScaleOnAxis();
-                      final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
-                      _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
-                      
-                      if (_draggedHandle != null) {
-                        setState(() { 
-                          if (_draggedHandle == ResizeHandleType.rotate) {
-                            _isRotatingElement = true;
-                            final elementCenter = selectedElement.bounds.center;
-                            _startRotationAngle = _calculateAngle(elementCenter, localPosition) - selectedElement.rotation;
-                          } else {
-                            _isResizingElement = true;
-                          }
-                          _elementBeingInteractedWith = selectedElement; 
-                        });
-                        
-                        if (_isRotatingElement) {
-                          drawingProvider.startPotentialRotation();
-                        } else {
-                          drawingProvider.startPotentialResize();
-                        }
-                        
-                        HapticFeedback.mediumImpact();
-                        actionTaken = true;
-                      }
-                    }
-                  }
-                  
-                  if (!actionTaken) {
+                  // Direct handling for pen tool to ensure drawing starts immediately
+                  if (currentTool == ElementType.pen) {
+                    // Start drawing immediately
+                    drawingProvider.startDrawing(localPosition);
+                  } else if (currentTool != ElementType.none) {
                     DrawingElement? hitElement = currentElements.lastWhereOrNull(
                       (el) => el.containsPoint(localPosition)
                     );
-                    
+
                     if (hitElement != null) {
-                      setState(() {
-                        _elementBeingInteractedWith = hitElement;
-                      });
-                      
                       _longPressTimer = Timer(longPressDuration, () {
-                        if (!mounted || _elementBeingInteractedWith == null) return;
+                        if (!mounted) return;
                         
                         setState(() { 
                           _isSelectionInProgress = true;
+                          _elementBeingInteractedWith = hitElement;
                         });
                         
-                        drawingProvider.clearSelection(notify: false);
+                        HapticFeedback.mediumImpact();
                         drawingProvider.selectElement(hitElement);
                         drawingProvider.showContextToolbar = true;
-                        
-                        HapticFeedback.mediumImpact(); 
                         
                         _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
                           if (!mounted || _elementBeingInteractedWith == null) return;
@@ -265,26 +243,173 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                           drawingProvider.startPotentialMove();
                         });
                       });
+                    } else if (currentTool == ElementType.text) {
+                      _showTextDialog(context, drawingProvider, localPosition);
+                    }
+                  } else {
+                    bool actionTaken = false;
+                    
+                    if (selectedIds.length == 1) {
+                      final selectedElement = currentElements.firstWhereOrNull(
+                        (el) => el.id == selectedIds.first
+                      );
                       
-                      actionTaken = true;
+                      if (selectedElement != null) {
+                        final double scale = transform.getMaxScaleOnAxis();
+                        final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+                        _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
+                        
+                        if (_draggedHandle != null) {
+                          setState(() { 
+                            if (_draggedHandle == ResizeHandleType.rotate) {
+                              _isRotatingElement = true;
+                              final elementCenter = selectedElement.bounds.center;
+                              _startRotationAngle = _calculateAngle(elementCenter, localPosition) - selectedElement.rotation;
+                            } else {
+                              _isResizingElement = true;
+                            }
+                            _elementBeingInteractedWith = selectedElement; 
+                          });
+                          
+                          if (_isRotatingElement) {
+                            drawingProvider.startPotentialRotation();
+                          } else {
+                            drawingProvider.startPotentialResize();
+                          }
+                          
+                          HapticFeedback.mediumImpact();
+                          actionTaken = true;
+                        }
+                      }
+                    }
+                    
+                    if (!actionTaken) {
+                      DrawingElement? hitElement = currentElements.lastWhereOrNull(
+                        (el) => el.containsPoint(localPosition)
+                      );
+                      
+                      if (hitElement != null) {
+                        setState(() {
+                          _elementBeingInteractedWith = hitElement;
+                        });
+                        
+                        _longPressTimer = Timer(longPressDuration, () {
+                          if (!mounted || _elementBeingInteractedWith == null) return;
+                          
+                          setState(() { 
+                            _isSelectionInProgress = true;
+                          });
+                          
+                          drawingProvider.clearSelection(notify: false);
+                          drawingProvider.selectElement(hitElement);
+                          drawingProvider.showContextToolbar = true;
+                          
+                          HapticFeedback.mediumImpact(); 
+                          
+                          _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
+                            if (!mounted || _elementBeingInteractedWith == null) return;
+                            
+                            setState(() { 
+                              _isMovingElement = true; 
+                            });
+                            
+                            drawingProvider.startPotentialMove();
+                          });
+                        });
+                        
+                        actionTaken = true;
+                      }
+                    }
+                    
+                    if (!actionTaken) {
+                      drawingProvider.clearSelection();
+                      drawingProvider.showContextToolbar = false;
                     }
                   }
-                  
-                  if (!actionTaken) {
-                    drawingProvider.clearSelection();
-                    drawingProvider.showContextToolbar = false;
+                } 
+                else if (_activePointers == 2) {
+                  // Second pointer logic - check if we're already interacting with an element
+                  if (_elementBeingInteractedWith != null) {
+                    _cancelLongPressTimer();
+                    _cancelMoveTimer();
+                    
+                    // Initialize multi-touch interaction if we have a selected element
+                    if (selectedIds.isNotEmpty) {
+                      setState(() {
+                        _isMultiTouchInteraction = true;
+                        _isMovingElement = false;
+                        _midPoint = _getMidpoint();
+                        _initialRotation = _getRotationAngle();
+                        _initialScale = 1.0;
+                        _lastScale = 1.0;
+                      });
+                      
+                      // Prevent further propagation of this event
+                      HapticFeedback.mediumImpact();
+                    }
                   }
                 }
               },
 
               onPointerMove: (PointerMoveEvent event) {
-                if (!mounted || _activePointers != 1 || widget.isInteracting) return;
+                if (!mounted) return;
+                
+                // Update the pointer position
+                _pointerPositions[event.pointer] = event.localPosition;
+                
                 final Offset localPosition = event.localPosition;
+                final currentTool = drawingProvider.currentTool;
+
+                // Handle multi-touch interaction for selected elements
+                if (_elementBeingInteractedWith != null && _pointerPositions.length == 2 && _isMultiTouchInteraction) {
+                  // Calculate new scale and rotation
+                  final currentMidPoint = _getMidpoint();
+                  final currentRotation = _getRotationAngle();
+                  
+                  // Calculate distance between points
+                  final pointers = _pointerPositions.values.toList();
+                  final currentDistance = _getDistance(pointers[0], pointers[1]);
+                  
+                  // Get initial distance if needed
+                  if (_initialScale == 1.0) {
+                    final initialDistance = currentDistance;
+                    if (initialDistance > 0) {
+                      _initialScale = initialDistance;
+                    }
+                  }
+                  
+                  // Calculate new scale factor
+                  final double newScale = currentDistance / _initialScale;
+                  if (newScale > 0 && (newScale - _lastScale).abs() > 0.01) {
+                    // Apply scale
+                    drawingProvider.scaleSelected(
+                      _elementBeingInteractedWith!.id,
+                      newScale / _lastScale,
+                      currentMidPoint
+                    );
+                    _lastScale = newScale;
+                  }
+                  
+                  // Calculate rotation delta
+                  final rotationDelta = currentRotation - _initialRotation;
+                  if (rotationDelta.abs() > 0.05) {
+                    // Apply rotation
+                    final elementCenter = _elementBeingInteractedWith!.bounds.center;
+                    drawingProvider.rotateSelectedImmediate(
+                      _elementBeingInteractedWith!.id,
+                      _elementBeingInteractedWith!.rotation + rotationDelta
+                    );
+                    _initialRotation = currentRotation;
+                  }
+                  
+                  return;
+                }
+                
+                if (_activePointers != 1 || widget.isInteracting) return;
                 
                 final delta = (_lastInteractionPosition != null) 
                     ? localPosition - _lastInteractionPosition! 
                     : Offset.zero;
-                final currentTool = drawingProvider.currentTool;
 
                 // Check if we're currently drawing with the pen tool
                 if (currentTool == ElementType.pen && drawingProvider.currentElement != null) {
@@ -337,6 +462,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerUp: (PointerUpEvent event) {
                 if (!mounted) return;
                 
+                // Remove this pointer from tracking
+                _pointerPositions.remove(event.pointer);
+                
                 _cancelMoveTimer();
                 _cancelLongPressTimer();
                 
@@ -347,61 +475,86 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 bool wasResizing = _isResizingElement;
                 bool wasRotating = _isRotatingElement;
                 bool wasSelecting = _isSelectionInProgress;
+                bool wasMultiTouch = _isMultiTouchInteraction;
                 DrawingElement? interactedElement = _elementBeingInteractedWith;
 
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
-                  _isMovingElement = false; 
-                  _isResizingElement = false; 
-                  _isRotatingElement = false;
-                  _isSelectionInProgress = false;
-                  _draggedHandle = null; 
-                  _elementBeingInteractedWith = null;
-                  _startRotationAngle = null;
                 });
-                _lastInteractionPosition = null; 
-                _potentialInteractionStartPosition = null;
 
-                if (_activePointers == 0 && !widget.isInteracting) {
-                  // Specifically check if a pen stroke is active and needs to be finalized
-                  if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
-                    drawingProvider.endDrawing();
-                    return; // Early return to avoid other handlers
-                  }
+                // If we're ending multi-touch interaction
+                if (_activePointers < 2 && wasMultiTouch) {
+                  setState(() {
+                    _isMultiTouchInteraction = false;
+                    // Keep the element selected after multi-touch
+                  });
                   
-                  if (wasResizing) { 
+                  // Finalize scaling/rotation
+                  if (wasResizing) {
                     drawingProvider.endPotentialResize();
-                    drawingProvider.clearSelection();
-                  } else if (wasMoving) { 
-                    drawingProvider.endPotentialMove();
-                    drawingProvider.clearSelection();
-                  } else if (wasRotating) { 
+                  }
+                  if (wasRotating) {
                     drawingProvider.endPotentialRotation();
-                    drawingProvider.clearSelection(); 
-                  } else if (interactedElement != null && !wasSelecting) {
-                    if (selectedIds.contains(interactedElement.id)) {
-                      if (interactedElement is VideoElement) {
-                        drawingProvider.toggleVideoPlayback(interactedElement.id);
-                        drawingProvider.clearSelection();
-                      } else if (interactedElement is NoteElement) {
-                        final now = DateTime.now();
-                        if (_lastTapTime != null && now.difference(_lastTapTime!).inMilliseconds < 500) {
-                          _showNoteEditDialog(context, drawingProvider, interactedElement);
+                  }
+                  return;
+                }
+
+                if (_activePointers == 0) {
+                  setState(() { 
+                    _isMovingElement = false; 
+                    _isResizingElement = false; 
+                    _isRotatingElement = false;
+                    _isSelectionInProgress = false;
+                    _isMultiTouchInteraction = false;
+                    _draggedHandle = null; 
+                    _elementBeingInteractedWith = null;
+                    _startRotationAngle = null;
+                  });
+                  _lastInteractionPosition = null; 
+                  _potentialInteractionStartPosition = null;
+                  
+                  if (!widget.isInteracting) {
+                    // Specifically check if a pen stroke is active and needs to be finalized
+                    if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
+                      drawingProvider.endDrawing();
+                      return; // Early return to avoid other handlers
+                    }
+                    
+                    if (wasResizing) { 
+                      drawingProvider.endPotentialResize();
+                      drawingProvider.clearSelection();
+                    } else if (wasMoving) { 
+                      drawingProvider.endPotentialMove();
+                      drawingProvider.clearSelection();
+                    } else if (wasRotating) { 
+                      drawingProvider.endPotentialRotation();
+                      drawingProvider.clearSelection(); 
+                    } else if (interactedElement != null && !wasSelecting) {
+                      // Handle tap on selected element...
+                      if (selectedIds.contains(interactedElement.id)) {
+                        if (interactedElement is VideoElement) {
+                          drawingProvider.toggleVideoPlayback(interactedElement.id);
+                          drawingProvider.clearSelection();
+                        } else if (interactedElement is NoteElement) {
+                          final now = DateTime.now();
+                          if (_lastTapTime != null && now.difference(_lastTapTime!).inMilliseconds < 500) {
+                            _showNoteEditDialog(context, drawingProvider, interactedElement);
+                          }
+                          _lastTapTime = now;
+                          drawingProvider.clearSelection();
+                        } else if (interactedElement is TextElement) {
+                          _showTextDialog(context, drawingProvider, tapPosition, existingText: interactedElement);
+                          drawingProvider.clearSelection();
+                        } else {
+                          drawingProvider.clearSelection();
                         }
-                        _lastTapTime = now;
-                        drawingProvider.clearSelection();
-                      } else if (interactedElement is TextElement) {
-                        _showTextDialog(context, drawingProvider, tapPosition, existingText: interactedElement);
-                        drawingProvider.clearSelection();
                       } else {
-                        drawingProvider.clearSelection();
+                        drawingProvider.selectElement(interactedElement);
+                        drawingProvider.showContextToolbar = true;
+                        Future.delayed(Duration(milliseconds: 100), () {
+                          drawingProvider.clearSelection();
+                        });
                       }
-                    } else {
-                      drawingProvider.selectElement(interactedElement);
-                      drawingProvider.showContextToolbar = true;
-                      Future.delayed(Duration(milliseconds: 100), () {
-                        drawingProvider.clearSelection();
-                      });
                     }
                   }
                 }
@@ -409,11 +562,17 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
               onPointerCancel: (PointerCancelEvent event) {
                 if (!mounted) return;
+                
+                // Remove this pointer from tracking
+                _pointerPositions.remove(event.pointer);
+                
                 _cancelMoveTimer(); 
                 _cancelLongPressTimer();
                 bool wasMoving = _isMovingElement;
                 bool wasResizing = _isResizingElement;
                 bool wasRotating = _isRotatingElement;
+                bool wasMultiTouch = _isMultiTouchInteraction;
+                
                 if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
                   drawingProvider.discardDrawing();
                 } else if (wasResizing) { 
@@ -423,12 +582,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 } else if (wasRotating) { 
                   drawingProvider.endPotentialRotation();
                 }
+                
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                   _isMovingElement = false; 
                   _isResizingElement = false; 
                   _isRotatingElement = false;
                   _isSelectionInProgress = false;
+                  _isMultiTouchInteraction = false;
                   _draggedHandle = null; 
                   _elementBeingInteractedWith = null; 
                   _startRotationAngle = null;
@@ -853,7 +1014,7 @@ class SelectionPainter extends CustomPainter {
       final center = element.bounds.center;
       canvas.translate(center.dx, center.dy);
       canvas.rotate(element.rotation);
-      canvas.translate(-center.dx, -center.dy);
+      canvas.translate(-center.dx, center.dy);
     }
     
     final Paint outlinePaint = Paint()

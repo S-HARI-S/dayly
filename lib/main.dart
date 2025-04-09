@@ -180,29 +180,37 @@ class _DrawingBoardState extends State<DrawingBoard> {
             },
             // Make this listener transparent to interactions intended for the canvas
             behavior: HitTestBehavior.translucent,
-            child: InteractiveViewer(
-              transformationController: _transformationController,
-              boundaryMargin: const EdgeInsets.all(0),
-              maxScale: 10.0,
-              minScale: 0.05, // Add this parameter to allow zooming out much further
-              // Only enable pan and zoom with 2+ fingers (or ctrl+scroll/alt+scroll on web/desktop)
-              panEnabled: _pointerCount >= 2,
-              scaleEnabled: _pointerCount >= 2,
-              constrained: false, // Allow panning beyond initial viewport
-              child: Container(
-                // Define a large but finite canvas area
-                // Using double.infinity can cause layout issues in some cases
-                width: 100000 ,
-                height: 100000,
-                color: Colors.white, // Background color of the canvas area
-                alignment: Alignment.center, // Center the DrawingCanvas initially
-                // Pass the controller down for coordinate transformations
-                child: DrawingCanvas(
+            child: Consumer<DrawingProvider>(
+              builder: (context, drawingProvider, child) {
+                // Disable canvas zooming when an element is selected
+                final bool enableInteractions = _pointerCount >= 2 && 
+                                               drawingProvider.selectedElementIds.isEmpty;
+                
+                return InteractiveViewer(
                   transformationController: _transformationController,
-                  // Let the canvas know if panning/scaling is active
-                  isInteracting: _pointerCount >= 2,
-                ),
-              ),
+                  boundaryMargin: const EdgeInsets.all(0),
+                  maxScale: 10.0,
+                  minScale: 0.05,
+                  // Only enable pan and zoom when no element is selected
+                  panEnabled: enableInteractions,
+                  scaleEnabled: enableInteractions,
+                  constrained: false,
+                  child: Container(
+                    // Define a large but finite canvas area
+                    // Using double.infinity can cause layout issues in some cases
+                    width: 100000 ,
+                    height: 100000,
+                    color: Colors.white, // Background color of the canvas area
+                    alignment: Alignment.center, // Center the DrawingCanvas initially
+                    // Pass the controller down for coordinate transformations
+                    child: DrawingCanvas(
+                      transformationController: _transformationController,
+                      // Let the canvas know if panning/scaling is active
+                      isInteracting: enableInteractions && _pointerCount >= 2,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
 

@@ -800,6 +800,38 @@ class DrawingProvider extends ChangeNotifier {
     }
   }
 
+  // --- Scaling Logic ---
+  void scaleSelected(String elementId, double scaleFactor, Offset scaleCenter) {
+    final element = elements.firstWhereOrNull((e) => e.id == elementId);
+    if (element == null) return;
+    
+    _didResizeOccur = true;
+    final index = elements.indexOf(element);
+    
+    if ((scaleFactor - 1.0).abs() < 0.001) return;
+    
+    final Rect currentBounds = element.bounds;
+    final Offset elementCenter = currentBounds.center;
+    
+    // Scale from the center
+    final double newWidth = currentBounds.width * scaleFactor;
+    final double newHeight = currentBounds.height * scaleFactor;
+    
+    // Calculate the new position to keep the center fixed
+    final Offset newPosition = elementCenter - Offset(newWidth / 2, newHeight / 2);
+    
+    final updatedElement = element.copyWith(
+      position: newPosition,
+      size: Size(newWidth, newHeight),
+    );
+    
+    List<DrawingElement> updatedElements = List.from(elements);
+    updatedElements[index] = updatedElement;
+    elements = updatedElements;
+    
+    notifyListeners();
+  }
+
   // --- Video Playback ---
   void toggleVideoPlayback(String elementId) {
     final element = elements.firstWhere((e) => e.id == elementId);
