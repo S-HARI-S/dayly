@@ -19,6 +19,7 @@ dependencies:
   # --- Calendar & Formatting ---
   table_calendar: ^3.1.0 # For calendar UI
   intl: ^0.19.0 # For date formatting
+  visibility_detector: ^0.4.0+2
 
   # --- Media ---
   image_picker: ^1.1.2 # Latest stable version

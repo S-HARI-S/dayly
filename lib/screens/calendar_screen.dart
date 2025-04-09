@@ -2,8 +2,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'dart:math' as math;
+import 'dart:async';
+import 'package:visibility_detector/visibility_detector.dart';
 
 import '../providers/calendar_provider.dart';
 import '../providers/drawing_provider.dart';
@@ -23,493 +25,423 @@ class CalendarScreen extends StatefulWidget {
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
-  CalendarFormat _calendarFormat = CalendarFormat.month;
-  DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
-  late List<DateTime> _markedDates;
-
+  DateTime _currentDate = DateTime.now();
+  late List<DateTime> _monthsList;
+  
+  // Number of grid columns
+  final int _gridColumns = 3;
+  
+  // Number of months to generate into the future
+  final int _futureMonths = 120; // e.g., 10 years
+  
+  // Size constants for the vertical scrolling layout
+  final double _monthHeaderHeight = 40.0;
+  
+  // For tracking visible month in app bar
+  final ScrollController _scrollController = ScrollController();
+  String _visibleMonthTitle = '';
+  int _currentVisibleMonthIndex = 0;
+  
+  // Debounce timer for title updates
+  Timer? _titleUpdateTimer;
+  
+  // Flag to track if we're currently in a title change cooldown period
+  bool _titleChangeCooldown = false;
+  
+  // Set to keep track of currently visible header indices
+  final Set<int> _visibleHeaderIndices = {};
+  
   @override
   void initState() {
     super.initState();
-    _selectedDay = _focusedDay;
-    _markedDates = [];
+    
+    // Initialize months list with current month in the middle
+    _initializeMonthsList();
     
     // Load saved entries when screen is first shown
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
       calendarProvider.loadEntriesFromDisk();
-      _updateMarkedDates();
+      
+      // Set initial title - should be the first month in the list
+      // No delay needed here as the list is now fixed from the start
+      _updateVisibleMonth(0, force: true); 
+      
+      // Removed delayed update logic
     });
   }
   
-  void _updateMarkedDates() {
+  @override
+  void dispose() {
+    _titleUpdateTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+  
+  void _updateVisibleMonth(int monthIndex, {bool force = false}) {
+    // Skip update if in cooldown unless forced
+    if (_titleChangeCooldown && !force && monthIndex == _currentVisibleMonthIndex) return;
+    
+    if (monthIndex >= 0 && monthIndex < _monthsList.length) {
+      final DateTime month = _monthsList[monthIndex];
+      final newTitle = '${DateFormat.MMMM().format(month).toLowerCase()} ${month.year}';
+      
+      // Log when the update function is called *because a new month passed*
+      print('>>> $newTitle PASSED - Triggering title update');
+      
+      // Cancel any pending updates
+      _titleUpdateTimer?.cancel();
+      
+      // Schedule update with a short delay to prevent rapid changes
+      _titleUpdateTimer = Timer(const Duration(milliseconds: 150), () {
+        if (mounted) {
+          // Verify that the index is still the best match before updating
+          // This helps prevent unnecessary updates during rapid scrolling
+          setState(() {
+            // Format month name in lowercase for consistent style
+            _visibleMonthTitle = '${DateFormat.MMMM().format(month).toLowerCase()} ${month.year}';
+            _currentVisibleMonthIndex = monthIndex;
+            
+            // Set cooldown flag to prevent rapid changes
+            _titleChangeCooldown = true;
+            
+            // Clear cooldown after a delay
+            // Using a longer cooldown helps prevent title flickering
+            Timer(const Duration(milliseconds: 500), () {
+              if (mounted) {
+                setState(() {
+                  _titleChangeCooldown = false;
+                });
+              }
+            });
+          });
+        }
+      });
+    }
+  }
+  
+  void _initializeMonthsList() {
+    _monthsList = [];
+    final currentMonth = DateTime(_currentDate.year, _currentDate.month);
+    
+    // Add current month
+    _monthsList.add(currentMonth);
+    
+    // Add future months
+    for (int i = 1; i <= _futureMonths; i++) {
+      _monthsList.add(_addMonths(currentMonth, i));
+    }
+    // Removed past month generation
+  }
+  
+  DateTime _addMonths(DateTime date, int months) {
+    var newMonth = date.month + months;
+    var newYear = date.year + (newMonth > 12 ? (newMonth - 1) ~/ 12 : 0);
+    newMonth = ((newMonth - 1) % 12) + 1;
+    return DateTime(newYear, newMonth);
+  }
+
+  // Helper to get all days in the selected month with canvas data
+  List<Map<String, dynamic>> _getDaysInMonth(int year, int month) {
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
     
-    // Get dates with entries for the current view
-    final firstDay = DateTime(_focusedDay.year, _focusedDay.month, 1);
-    final lastDay = DateTime(_focusedDay.year, _focusedDay.month + 1, 0);
+    // Ensure month value is valid (1-12)
+    if (month < 1 || month > 12) {
+      // Adjust year and month if out of bounds
+      if (month < 1) {
+        year--;
+        month = 12;
+      } else if (month > 12) {
+        year++;
+        month = 1;
+      }
+    }
     
-    setState(() {
-      _markedDates = calendarProvider.getDatesWithEntries(firstDay, lastDay);
-    });
+    final int daysInMonth = DateTime(year, month + 1, 0).day;
+    
+    // Get dates with entries for the current month
+    final List<CalendarEntry> monthEntries = calendarProvider.getEntriesForMonth(year, month);
+    
+    List<Map<String, dynamic>> days = [];
+    
+    // Add days of current month
+    for (int i = 1; i <= daysInMonth; i++) {
+      final DateTime currentDate = DateTime(year, month, i);
+      
+      // Find entry for this date (if any)
+      CalendarEntry? entry;
+      final entriesForDay = calendarProvider.getEntriesForDate(currentDate);
+      if (entriesForDay.isNotEmpty) {
+        // Take only the first entry per day
+        entry = entriesForDay.first;
+      }
+      
+      days.add({
+        'day': i,
+        'date': currentDate,
+        'entry': entry,
+        'isToday': currentDate.year == DateTime.now().year && 
+                   currentDate.month == DateTime.now().month && 
+                   currentDate.day == DateTime.now().day,
+      });
+    }
+    
+    return days;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Calendar'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'New Canvas',
-            onPressed: () => _createNewCanvas(context),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.0, 0.5),
+                  end: Offset.zero,
+                ).animate(CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeInOut,
+                )),
+                child: child,
+              ),
+            );
+          },
+          child: Text(
+            _visibleMonthTitle.isEmpty ? 'calendar' : _visibleMonthTitle,
+            key: ValueKey<String>(_visibleMonthTitle),
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 24,
+              fontWeight: FontWeight.w400,
+            ),
           ),
-        ],
+        ),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black54),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: Consumer<CalendarProvider>(
         builder: (context, calendarProvider, child) {
-          // Update marked dates when provider data changes
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _updateMarkedDates();
-          });
-          
-          return Column(
-            children: [
-              TableCalendar(
-                firstDay: DateTime.utc(2020, 1, 1),
-                lastDay: DateTime.utc(2030, 12, 31),
-                focusedDay: _focusedDay,
-                calendarFormat: _calendarFormat,
-                selectedDayPredicate: (day) {
-                  return isSameDay(_selectedDay, day);
-                },
-                onDaySelected: (selectedDay, focusedDay) {
-                  setState(() {
-                    _selectedDay = selectedDay;
-                    _focusedDay = focusedDay;
-                  });
-                  calendarProvider.selectDate(selectedDay);
-                },
-                onFormatChanged: (format) {
-                  setState(() {
-                    _calendarFormat = format;
-                  });
-                },
-                onPageChanged: (focusedDay) {
-                  setState(() {
-                    _focusedDay = focusedDay;
-                  });
-                  _updateMarkedDates();
-                },
-                calendarBuilders: CalendarBuilders(
-                  markerBuilder: (context, date, events) {
-                    // Check if this date has an entry
-                    if (_markedDates.any((markedDate) => 
-                        markedDate.year == date.year && 
-                        markedDate.month == date.month && 
-                        markedDate.day == date.day)) {
-                      // Get the number of entries for this date
-                      final entryCount = calendarProvider.getEntryCountForDate(date);
-                      
-                      return Positioned(
-                        right: 1,
-                        bottom: 1,
-                        child: Container(
-                          width: 14,
-                          height: 14,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.blue,
-                            border: Border.all(color: Colors.white, width: 1.0),
-                          ),
-                          child: Center(
-                            child: Text(
-                              entryCount.toString(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                    return null;
-                  },
-                ),
-                calendarStyle: const CalendarStyle(
-                  todayDecoration: BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
-                  ),
-                  selectedDecoration: BoxDecoration(
-                    color: Colors.deepPurple,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: _buildEntriesList(context, calendarProvider),
-              ),
-            ],
-          );
+          return _buildMonthList();
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _createNewCanvas(context),
-        tooltip: 'Create New Canvas',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  Widget _buildEntriesList(BuildContext context, CalendarProvider calendarProvider) {
-    if (_selectedDay == null) {
-      return const Center(child: Text('Please select a date'));
-    }
-    
-    final selectedDate = _selectedDay!;
-    final entries = calendarProvider.getEntriesForDate(selectedDate);
-    
-    if (entries.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('No entries for this date'),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.add),
-              label: const Text('Create New Canvas'),
-              onPressed: () => _createNewCanvas(context),
-            ),
-          ],
-        ),
-      );
-    }
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Text(
-            '${DateFormat.yMMMMd().format(selectedDate)} - ${entries.length} ${entries.length == 1 ? 'Canvas' : 'Canvases'}',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: ListView.builder(
-            itemCount: entries.length,
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return _buildCanvasCard(context, entry);
-            },
-          ),
-        ),
-      ],
     );
   }
   
-  Widget _buildCanvasCard(BuildContext context, CalendarEntry entry) {
+  Widget _buildMonthList() {
+    return ListView.builder(
+      controller: _scrollController,
+      itemCount: _monthsList.length,
+      itemBuilder: (context, monthIndex) {
+        final yearMonth = _monthsList[monthIndex];
+        final year = yearMonth.year;
+        final month = yearMonth.month;
+        final days = _getDaysInMonth(year, month);
+        
+        // Add padding between months for visual separation
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Month header wrapped in VisibilityDetector
+              VisibilityDetector(
+                key: ValueKey('vis_header_$monthIndex'), // Unique key for the detector
+                onVisibilityChanged: (info) => _onHeaderVisibilityChanged(monthIndex, info),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                  width: double.infinity,
+                  alignment: Alignment.centerLeft,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        offset: const Offset(0, 1),
+                        blurRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    '${DateFormat.MMMM().format(DateTime(year, month)).toLowerCase()} $year',
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+              // Days grid
+              GridView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: _gridColumns,
+                  childAspectRatio: 0.65,
+                  crossAxisSpacing: 4.0,
+                  mainAxisSpacing: 4.0,
+                ),
+                itemCount: days.length,
+                itemBuilder: (context, dayIndex) {
+                  final day = days[dayIndex];
+                  final bool isToday = day['isToday'] ?? false;
+                  
+                  return _buildDayCell(context, day, isToday);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  Widget _buildDayCell(BuildContext context, Map<String, dynamic> dayData, bool isToday) {
+    final day = dayData['day'];
+    final date = dayData['date'] as DateTime;
+    final entry = dayData['entry'] as CalendarEntry?;
+    
+    return GestureDetector(
+      onTap: () => _handleDayTap(date, entry),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade200),
+          color: Colors.white,
+        ),
+        padding: const EdgeInsets.all(1.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Day number and weekday
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0, top: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    day.toString(),
+                    style: TextStyle(
+                      fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 18,
+                      color: isToday ? Colors.black : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    DateFormat('EEE').format(date).toLowerCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                      fontWeight: isToday ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Canvas thumbnail or empty space
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.all(1.0),
+                child: entry != null 
+                    ? _buildThumbnail(context, entry) 
+                    : Container(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildThumbnail(BuildContext context, CalendarEntry entry) {
     // Check if thumbnail file exists
     bool thumbnailExists = false;
-    File? thumbnailFile; // Store the file object
+    File? thumbnailFile;
 
     if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty) {
       thumbnailFile = File(entry.thumbnailPath!);
       try {
         thumbnailExists = thumbnailFile.existsSync();
       } catch (e) {
-         thumbnailExists = false; // Assume not exists if error occurs
+         thumbnailExists = false;
       }
     }
 
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Title bar with canvas name and time
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    entry.title.isEmpty 
-                        ? 'Canvas ${DateFormat('h:mm a').format(entry.createdAt)}' 
-                        : entry.title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Text(
-                  DateFormat('h:mm a').format(entry.createdAt),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600]
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Canvas thumbnail or fallback
-          Container(
-            height: 150,
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Added vertical padding
-            color: Colors.grey[100], // Background for the container
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8.0),
-              child: GestureDetector(
-                onTap: () => _openCanvas(context, entry),
+    return ClipRect(
                 child: (thumbnailFile != null && thumbnailExists)
                     ? Image.file(
-                        thumbnailFile, // Use the File object
-                        key: ValueKey(entry.thumbnailPath), // Add key for potential updates
-                        fit: BoxFit.contain, // Contain ensures aspect ratio is kept
+              thumbnailFile,
+              key: ValueKey(entry.thumbnailPath),
+              fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
-                          // Return the fallback widget on error
                           return _buildThumbnailFallback(context, entry, error.toString());
                         },
                       )
-                    : _buildThumbnailFallback(context, entry, thumbnailExists ? 'File exists but Image.file not attempted' : 'File does not exist or path is null'),
-              ),
-            ),
-          ),
-
-          // Action buttons
-          OverflowBar(
-            alignment: MainAxisAlignment.end,
-            children: [
-              // Edit title button
-              IconButton(
-                icon: const Icon(Icons.edit_note, size: 20),
-                onPressed: () => _showEditTitleDialog(context, entry),
-                tooltip: 'Edit Title',
-              ),
-              // Open button
-              TextButton.icon(
-                icon: const Icon(Icons.edit, size: 16),
-                label: const Text('Open'),
-                onPressed: () => _openCanvas(context, entry),
-              ),
-              // Delete button
-              TextButton.icon(
-                icon: const Icon(Icons.delete, size: 16),
-                label: const Text('Delete'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red,
-                ),
-                onPressed: () => _confirmDelete(context, entry),
-              ),
-            ],
-          ),
-        ],
-      ),
+          : _buildThumbnailFallback(context, entry, 'No thumbnail'),
     );
   }
 
-  // Helper method to build a fallback thumbnail - now accepts an error message
   Widget _buildThumbnailFallback(BuildContext context, CalendarEntry entry, String reason) {
-    // Count element types for the fallback display
-    int noteCount = 0;
-    int imageCount = 0;
-    int penCount = 0;
-    int textCount = 0;
-    int gifCount = 0;
-    
-    for (var element in entry.elements) {
-      if (element is NoteElement) noteCount++;
-      else if (element is ImageElement) imageCount++;
-      else if (element is PenElement) penCount++;
-      else if (element is TextElement) textCount++;
-      else if (element is GifElement) gifCount++;
-    }
-    
     return Container(
-      color: Colors.grey[200],
-      child: Center(
-        child: Padding( // Add padding around the fallback content
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.broken_image_outlined, // Use a different icon
-                size: 32,
-                color: Colors.grey[500], // Slightly darker grey
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Preview Unavailable', // More descriptive text
-                style: TextStyle(
-                  color: Colors.grey[700], // Darker text
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '(${entry.elements.length} elements)', // Show element count
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 11,
-                ),
-              ),
-              // Optional: Show the reason if needed for debugging
-              // Text(
-              //   reason,
-              //   style: TextStyle(color: Colors.red[300], fontSize: 9),
-              //   textAlign: TextAlign.center,
-              //   maxLines: 2,
-              //   overflow: TextOverflow.ellipsis,
-              // ),
-              // Element type chips (keep as is)
-              if (noteCount > 0 || imageCount > 0 || penCount > 0 || textCount > 0 || gifCount > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6.0),
-                  child: Wrap( // Use Wrap for better layout if many types exist
-                    spacing: 4.0,
-                    runSpacing: 4.0,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      if (noteCount > 0) _buildElementTypeChip(context, 'Notes', noteCount),
-                      if (imageCount > 0) _buildElementTypeChip(context, 'Images', imageCount),
-                      if (penCount > 0) _buildElementTypeChip(context, 'Drawings', penCount),
-                      if (textCount > 0) _buildElementTypeChip(context, 'Text', textCount),
-                      if (gifCount > 0) _buildElementTypeChip(context, 'GIFs', gifCount),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+      color: Colors.grey[100],
     );
   }
 
-  Widget _buildElementTypeChip(BuildContext context, String label, int count) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.grey[300],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        '$label: $count',
-        style: TextStyle(
-          color: Colors.grey[700],
-          fontSize: 10,
-        ),
-      ),
-    );
-  }
-
-  void _showEditTitleDialog(BuildContext context, CalendarEntry entry) {
-    final titleController = TextEditingController(text: entry.title);
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Canvas Title'),
-        content: TextField(
-          controller: titleController,
-          decoration: const InputDecoration(
-            labelText: 'Canvas Title',
-            hintText: 'Enter a title for this canvas',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('CANCEL'),
-          ),
-          TextButton(
-            onPressed: () {
-              final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
-              final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-              
-              // Load the entry and update its title
-              calendarProvider.loadDrawing(entry.id, drawingProvider);
-              calendarProvider.updateEntry(entry.id, drawingProvider, title: titleController.text);
-              
-              Navigator.of(context).pop();
-            },
-            child: const Text('SAVE'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _createNewCanvas(BuildContext context) {
-    // Get providers
+  void _handleDayTap(DateTime date, CalendarEntry? existingEntry) {
     final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
     final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
     
-    // If a date is selected, use that, otherwise use today
-    final selectedDate = _selectedDay ?? DateTime.now();
+    // Select this date
+    calendarProvider.selectDate(date);
     
-    // Just select the date without selecting a specific entry
-    // This will prepare for creating a new canvas
-    calendarProvider.selectDate(selectedDate);
-    
-    // Clear current drawing and reset tools
+    if (existingEntry != null) {
+      // Open existing canvas
+      calendarProvider.loadDrawing(existingEntry.id, drawingProvider);
+    } else {
+      // Create new canvas
     drawingProvider.elements = [];
     drawingProvider.currentElement = null;
     drawingProvider.setTool(ElementType.select);
-    
-    // Navigate to drawing screen
-    Navigator.of(context).pop(); // Assuming this takes us back to main screen with canvas
-  }
-
-  void _openCanvas(BuildContext context, CalendarEntry entry) {
-    // Get providers
-    final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
-    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-    
-    // Load this entry's elements into drawing provider
-    calendarProvider.loadDrawing(entry.id, drawingProvider);
+    }
     
     // Navigate back to drawing screen
     Navigator.of(context).pop();
   }
 
-  void _confirmDelete(BuildContext context, CalendarEntry entry) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Canvas'),
-        content: Text(
-          entry.title.isEmpty
-            ? 'Are you sure you want to delete this canvas?'
-            : 'Are you sure you want to delete "${entry.title}"?'
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('CANCEL'),
-          ),
-          TextButton(
-            onPressed: () {
-              final calendarProvider = Provider.of<CalendarProvider>(context, listen: false);
-              calendarProvider.deleteEntry(entry.id);
-              Navigator.of(context).pop();
-            },
-            child: const Text('DELETE', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+  // New method to handle visibility changes from VisibilityDetector
+  void _onHeaderVisibilityChanged(int monthIndex, VisibilityInfo info) {
+    if (info.visibleFraction > 0) {
+      // Header is at least partially visible, add it to the set
+      _visibleHeaderIndices.add(monthIndex);
+    } else {
+      // Header is no longer visible, remove it from the set
+      _visibleHeaderIndices.remove(monthIndex);
+    }
+
+    // Determine the top-most visible header
+    int? topVisibleIndex;
+    if (_visibleHeaderIndices.isNotEmpty) {
+      // Find the minimum index in the set (this corresponds to the highest header)
+      topVisibleIndex = _visibleHeaderIndices.reduce(math.min);
+    }
+
+    // Update the title if the top-most visible header has changed
+    if (topVisibleIndex != null && topVisibleIndex != _currentVisibleMonthIndex) {
+      print('VisibilityDetector: Top visible header changed to index $topVisibleIndex. Triggering update.');
+      // Use force: true if we want immediate updates, or rely on existing debounce
+      _updateVisibleMonth(topVisibleIndex); 
+    }
   }
 }
