@@ -5,11 +5,12 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Add this import
 import 'providers/drawing_provider.dart';
 import 'providers/calendar_provider.dart';
-import 'widgets/drawing_canvas.dart';
+import 'widgets/drawing_canvas.dart';  // This imports the file with drawingCanvasKey
 import 'screens/calendar_screen.dart';
 import 'models/element.dart';
 import 'models/calendar_entry.dart';
-import 'widgets/context_toolbar.dart'; // Update to match the actual file name
+import 'widgets/pull_up_toolbar.dart'; // Replace the context_toolbar import
+import 'package:intl/intl.dart';
 
 // Load environment variables before running the app
 Future<void> main() async {
@@ -154,237 +155,108 @@ class _DrawingBoardState extends State<DrawingBoard> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Listener to track pointer count for enabling/disabling InteractiveViewer pan/zoom
-          Listener(
-            onPointerDown: (PointerDownEvent event) {
-              setState(() {
-                _pointerCount++;
-              });
-              // Mark as edited once user interacts with canvas
-              if (_isNewCanvas) {
-                _isNewCanvas = false;
-              }
-              _isSaved = false; // Mark as unsaved when user interacts with canvas
-            },
-            onPointerUp: (PointerUpEvent event) {
-              setState(() {
-                _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
-              });
-            },
-            onPointerCancel: (PointerCancelEvent event) {
-              setState(() {
-                _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
-              });
-            },
-            // Make this listener transparent to interactions intended for the canvas
-            behavior: HitTestBehavior.translucent,
-            child: Consumer<DrawingProvider>(
-              builder: (context, drawingProvider, child) {
-                // Disable canvas zooming when an element is selected
-                final bool enableInteractions = _pointerCount >= 2 && 
-                                               drawingProvider.selectedElementIds.isEmpty;
-                
-                return InteractiveViewer(
-                  transformationController: _transformationController,
-                  boundaryMargin: const EdgeInsets.all(0),
-                  maxScale: 10.0,
-                  minScale: 0.05,
-                  // Only enable pan and zoom when no element is selected
-                  panEnabled: enableInteractions,
-                  scaleEnabled: enableInteractions,
-                  constrained: false,
-                  child: Container(
-                    // Define a large but finite canvas area
-                    // Using double.infinity can cause layout issues in some cases
-                    width: 100000 ,
-                    height: 100000,
-                    color: Colors.white, // Background color of the canvas area
-                    alignment: Alignment.center, // Center the DrawingCanvas initially
-                    // Pass the controller down for coordinate transformations
-                    child: DrawingCanvas(
-                      transformationController: _transformationController,
-                      // Let the canvas know if panning/scaling is active
-                      isInteracting: enableInteractions && _pointerCount >= 2,
-                    ),
-                  ),
-                );
+      body: SafeArea(
+        bottom: true,
+        child: Stack(
+          children: [
+            // Listener to track pointer count for enabling/disabling InteractiveViewer pan/zoom
+            Listener(
+              onPointerDown: (PointerDownEvent event) {
+                setState(() {
+                  _pointerCount++;
+                });
+                // Mark as edited once user interacts with canvas
+                if (_isNewCanvas) {
+                  _isNewCanvas = false;
+                }
+                _isSaved = false; // Mark as unsaved when user interacts with canvas
               },
-            ),
-          ),
-
-          // Tool palette using Consumer for efficient updates
-          Positioned(
-            left: 16,
-            top: 16,
-            child: Card(
-              // Wrap palette in a Card for better visuals
-              elevation: 4.0,
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Consumer<DrawingProvider>(
-                  builder: (context, drawingProvider, child) {
-                    return Column(
-                      mainAxisSize: MainAxisSize.min, // Fit content
-                      children: [
-                        // --- Tools ---
-                        // Only show content creation tools
-                        // No selection tool button as per user request
-                        ToolButton(
-                          icon: Icons.edit,
-                          isSelected: drawingProvider.currentTool == ElementType.pen,
-                          onPressed: () => drawingProvider.setTool(ElementType.pen),
-                          tooltip: 'Pen Tool',
-                        ),
-                        ToolButton(
-                          icon: Icons.text_fields,
-                          isSelected: drawingProvider.currentTool == ElementType.text,
-                          onPressed: () => drawingProvider.setTool(ElementType.text),
-                          tooltip: 'Text Tool',
-                        ),
-                        const Divider(height: 16), // Separator
-
-                        // --- Media ---
-                        ToolButton(
-                          icon: Icons.image,
-                          isSelected: false, // Not a persistent tool
-                          onPressed: () { 
-                            _isNewCanvas = false; // Mark as edited when adding media
-                            _isSaved = false; // Mark as unsaved when adding media
-                            Provider.of<DrawingProvider>(context, listen: false)
-                              .addImageFromGallery(context, _transformationController); 
-                          },
-                          tooltip: 'Add Image',
-                        ),
-                        ToolButton(
-                          icon: Icons.videocam,
-                          isSelected: false, // Not a persistent tool
-                          onPressed: () {
-                            _isNewCanvas = false; // Mark as edited when adding media
-                            _isSaved = false; // Mark as unsaved when adding media
-                            Provider.of<DrawingProvider>(context, listen: false)
-                              .addVideoFromGallery(context, _transformationController);
-                          },
-                          tooltip: 'Add Video',
-                        ),
-                        ToolButton(
-                          icon: Icons.gif_box,
-                          isSelected: false, // Not a persistent tool
-                          onPressed: () {
-                            _isNewCanvas = false; // Mark as edited when adding media
-                            _isSaved = false; // Mark as unsaved when adding media
-                            Provider.of<DrawingProvider>(context, listen: false)
-                              .searchAndAddGif(context, _transformationController);
-                          },
-                          tooltip: 'Search & Add GIF',
-                        ),
-                        // Add a dedicated button for Sticky Notes in the main toolbar
-                        ToolButton(
-                          icon: Icons.sticky_note_2,
-                          isSelected: false,
-                          onPressed: () {
-                            _isNewCanvas = false; // Mark as edited
-                            _isSaved = false; // Mark as unsaved
-                            // Get the canvas center position
-                            final Size screenSize = MediaQuery.of(context).size;
-                            final Offset screenCenter = Offset(screenSize.width / 2, screenSize.height / 2);
-                            try {
-                              final Matrix4 inverseMatrix = Matrix4.inverted(_transformationController.value);
-                              final canvasPosition = MatrixUtils.transformPoint(inverseMatrix, screenCenter);
-                              // Create sticky note at the canvas center
-                              Provider.of<DrawingProvider>(context, listen: false)
-                                .createStickyNote(canvasPosition);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Sticky note created!'))
-                              );
-                            } catch (e) {
-                              // Fallback if matrix inversion fails
-                              Provider.of<DrawingProvider>(context, listen: false)
-                                .createStickyNote(const Offset(50000, 50000));
-                            }
-                          },
-                          tooltip: 'Add Sticky Note',
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-
-          // Status indicator - show if this is a new or edited canvas
-          Positioned(
-            top: 10,
-            right: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _isNewCanvas ? Icons.fiber_new : Icons.edit,
-                    color: Colors.white,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _isNewCanvas ? 'New Canvas' : 'Edited',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Debug info display
-          Positioned(
-            bottom: 10,
-            right: 10,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.black.withOpacity(0.6),
-              child: Consumer<CalendarProvider>(
-                builder: (context, calendarProvider, child) {
-                  final currentEntry = calendarProvider.currentEntry;
-                  final canvasInfo = currentEntry != null
-                      ? 'Canvas: ${currentEntry.title.isNotEmpty ? currentEntry.title : 'Untitled'}'
-                      : 'New Canvas';
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        canvasInfo,
-                        style: const TextStyle(color: Colors.white, fontSize: 10),
+              onPointerUp: (PointerUpEvent event) {
+                setState(() {
+                  _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
+                });
+              },
+              onPointerCancel: (PointerCancelEvent event) {
+                setState(() {
+                  _pointerCount = _pointerCount > 0 ? _pointerCount - 1 : 0;
+                });
+              },
+              // Make this listener transparent to interactions intended for the canvas
+              behavior: HitTestBehavior.translucent,
+              child: Consumer<DrawingProvider>(
+                builder: (context, drawingProvider, child) {
+                  // Disable canvas zooming when an element is selected
+                  final bool enableInteractions = _pointerCount >= 2 && 
+                                                 drawingProvider.selectedElementIds.isEmpty;
+                  
+                  return InteractiveViewer(
+                    transformationController: _transformationController,
+                    boundaryMargin: const EdgeInsets.all(0),
+                    maxScale: 10.0,
+                    minScale: 0.05,
+                    // Only enable pan and zoom when no element is selected
+                    panEnabled: enableInteractions,
+                    scaleEnabled: enableInteractions,
+                    constrained: false,
+                    child: Container(
+                      // Define a large but finite canvas area
+                      // Using double.infinity can cause layout issues in some cases
+                      width: 100000 ,
+                      height: 100000,
+                      color: Colors.white, // Background color of the canvas area
+                      alignment: Alignment.center, // Center the DrawingCanvas initially
+                      // Pass the controller down for coordinate transformations
+                      child: DrawingCanvas(
+                        key: drawingCanvasKey,
+                        transformationController: _transformationController,
+                        // Let the canvas know if panning/scaling is active
+                        isInteracting: enableInteractions && _pointerCount >= 2,
                       ),
-                      Text(
-                        'Pointers: $_pointerCount\nInteraction: ${_pointerCount >= 2}',
-                        style: const TextStyle(color: Colors.white, fontSize: 10),
-                      ),
-                    ],
+                    ),
                   );
                 },
               ),
             ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: Consumer<DrawingProvider>(
-        builder: (context, provider, _) {
-          // No need to check provider.showContextToolbar here, the component handles it
-          return ContextToolbar(
-            isVisible: provider.showContextToolbar,
-            onHeightChanged: (height) {
-              // We can leave this empty as the toolbar handles its own height
-            },
-          );
-        },
+
+            // Status indicator - show if this is a new or edited canvas
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isNewCanvas ? Icons.fiber_new : Icons.edit,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _isNewCanvas ? 'New Canvas' : 'Edited',
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Add the PullUpToolbar at the bottom of the Stack
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: PullUpToolbar(
+                transformationController: _transformationController,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

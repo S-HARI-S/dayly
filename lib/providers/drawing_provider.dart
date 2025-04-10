@@ -49,24 +49,9 @@ class DrawingProvider extends ChangeNotifier {
   // Unique ID generator
   final _uuid = const Uuid();
 
-  // Ensure proper initialization and clearer debug logging
-  bool _showContextToolbar = false;
-  bool get showContextToolbar {
-    // Never show the context toolbar - removed from the UI
-    return false;
-  }
-
-  set showContextToolbar(bool value) {
-    // No-op - context toolbar has been removed
-  }
-
   // --- Tool and Style Management ---
   void setTool(ElementType tool) {
-    // Hide toolbar when changing tools
-    if (tool != ElementType.none && currentTool == ElementType.none) {
-        _showContextToolbar = false;
-    }
-
+    // No need to handle toolbar when changing tools anymore
     currentTool = tool;
     
     // Clear selection when switching tools, unless we're staying in none mode
@@ -188,7 +173,6 @@ class DrawingProvider extends ChangeNotifier {
     }
     elements = redoStack.removeLast();
     selectedElementIds.clear();
-    _showContextToolbar = false;
     notifyListeners();
     print("Redo performed (${redoStack.length} states remain)");
   }
@@ -540,21 +524,11 @@ class DrawingProvider extends ChangeNotifier {
   void selectElement(DrawingElement element) {
     clearSelection(notify: false);
     selectedElementIds.add(element.id);
-    _showContextToolbar = true;
-    notifyListeners();
-  }
-
-  void showContextToolbarForElement(String elementId) {
-    if (!selectedElementIds.contains(elementId)) {
-      selectElement(elements.firstWhere((e) => e.id == elementId));
-    }
-    _showContextToolbar = true;
     notifyListeners();
   }
 
   void clearSelection({bool notify = true}) {
     selectedElementIds.clear();
-    _showContextToolbar = false;
     if (notify) notifyListeners();
   }
 
@@ -943,7 +917,6 @@ class DrawingProvider extends ChangeNotifier {
     currentElement = null;
     undoStack.clear();
     redoStack.clear();
-    _showContextToolbar = false;
     notifyListeners();
     print("Loaded ${elements.length} elements.");
   }
@@ -1085,7 +1058,6 @@ class DrawingProvider extends ChangeNotifier {
 
     elements.add(newNote);
     clearSelection();
-    showContextToolbar = false; // Make sure toolbar is hidden
     
     // Reset to interaction mode after creating note
     setTool(ElementType.none);

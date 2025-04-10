@@ -17,10 +17,31 @@ import '../models/gif_element.dart';
 import '../models/handles.dart';
 import '../models/pen_element.dart';  // Add missing import for PenElement
 import '../models/image_element.dart'; // Add missing import for ImageElement
-import '../widgets/context_toolbar.dart';
 import '../widgets/bottom_floating_button.dart';
 import '../models/note_element.dart'; // Fixed missing quote
 import '../widgets/radial_menu.dart'; // Add import for RadialMenu
+
+// Global key to access DrawingCanvas state from outside
+final GlobalKey<_DrawingCanvasState> drawingCanvasKey = GlobalKey<_DrawingCanvasState>();
+
+// Add a global method to toggle grid
+void toggleCanvasGrid() {
+  print("Attempting to toggle grid");
+  printDrawingCanvasState();
+  if (drawingCanvasKey.currentState != null) {
+    print("DrawingCanvas state found, toggling grid");
+    drawingCanvasKey.currentState!.toggleGrid();
+  } else {
+    print("Error: DrawingCanvas state not found");
+  }
+}
+
+// Helper to debug key state
+void printDrawingCanvasState() {
+  print("DrawingCanvas key: $drawingCanvasKey");
+  print("DrawingCanvas current state: ${drawingCanvasKey.currentState}");
+  print("DrawingCanvas current context: ${drawingCanvasKey.currentContext}");
+}
 
 // Add GridPainter class to draw the background grid
 class GridPainter extends CustomPainter {
@@ -40,11 +61,6 @@ class GridPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (!showGrid) return;
     
-    final paint = Paint()
-      ..color = gridColor.withOpacity(0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5;
-    
     // Get the scale factor from the transformation matrix
     final double scale = transform.getMaxScaleOnAxis();
     
@@ -56,12 +72,30 @@ class GridPainter extends CustomPainter {
     
     // Adjust grid spacing based on zoom level for better visibility
     double effectiveSpacing = gridSpacing;
+    double primaryLineOpacity = 0.15; // Reduced from 0.3
+    double secondaryLineOpacity = 0.07; // Reduced from 0.15
     
-    // Make grid more dense when zoomed out, less dense when zoomed in
-    if (scale < 0.5) {
+    // Make grid spacing dynamic based on zoom level
+    if (scale < 0.25) {
+      effectiveSpacing = gridSpacing * 8;
+      primaryLineOpacity = 0.25; // Reduced from 0.5
+      secondaryLineOpacity = 0.0; // No secondary lines at far zoom
+    } else if (scale < 0.5) {
+      effectiveSpacing = gridSpacing * 4;
+      primaryLineOpacity = 0.2; // Reduced from 0.4
+      secondaryLineOpacity = 0.0;
+    } else if (scale < 1.0) {
       effectiveSpacing = gridSpacing * 2;
-    } else if (scale > 2.0) {
+      primaryLineOpacity = 0.15; // Reduced from 0.3
+      secondaryLineOpacity = 0.05; // Reduced from 0.1
+    } else if (scale > 2.0 && scale <= 4.0) {
       effectiveSpacing = gridSpacing / 2;
+      primaryLineOpacity = 0.12; // Reduced from 0.25
+      secondaryLineOpacity = 0.06; // Reduced from 0.15
+    } else if (scale > 4.0) {
+      effectiveSpacing = gridSpacing / 4;
+      primaryLineOpacity = 0.1; // Reduced from 0.2
+      secondaryLineOpacity = 0.05; // Reduced from 0.1
     }
     
     // Calculate grid boundaries
@@ -70,21 +104,82 @@ class GridPainter extends CustomPainter {
     final double right = (visibleRect.right / effectiveSpacing).ceil() * effectiveSpacing;
     final double bottom = (visibleRect.bottom / effectiveSpacing).ceil() * effectiveSpacing;
     
-    // Draw vertical lines
+    // Create paints for primary and secondary lines
+    final primaryPaint = Paint()
+      ..color = gridColor.withOpacity(primaryLineOpacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5; // Reduced from 0.8
+      
+    final secondaryPaint = Paint()
+      ..color = gridColor.withOpacity(secondaryLineOpacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.3; // Reduced from 0.5
+    
+    // Draw secondary grid lines (finer grid)
+    if (secondaryLineOpacity > 0) {
+      final secondarySpacing = effectiveSpacing / 5;
+      
+      for (double x = left; x <= right; x += secondarySpacing) {
+        // Skip primary lines
+        if (x % effectiveSpacing == 0) continue;
+        
+        canvas.drawLine(
+          Offset(x, top),
+          Offset(x, bottom),
+          secondaryPaint,
+        );
+      }
+      
+      for (double y = top; y <= bottom; y += secondarySpacing) {
+        // Skip primary lines
+        if (y % effectiveSpacing == 0) continue;
+        
+        canvas.drawLine(
+          Offset(left, y),
+          Offset(right, y),
+          secondaryPaint,
+        );
+      }
+    }
+    
+    // Draw primary grid lines
     for (double x = left; x <= right; x += effectiveSpacing) {
       canvas.drawLine(
         Offset(x, top),
         Offset(x, bottom),
-        paint,
+        primaryPaint,
       );
     }
     
-    // Draw horizontal lines
     for (double y = top; y <= bottom; y += effectiveSpacing) {
       canvas.drawLine(
         Offset(left, y),
         Offset(right, y),
-        paint,
+        primaryPaint,
+      );
+    }
+    
+    // Draw origin indicators if visible
+    final originSize = effectiveSpacing / 5;
+    if (visibleRect.contains(Offset.zero)) {
+      // Draw X-axis
+      canvas.drawLine(
+        Offset(-originSize, 0),
+        Offset(originSize, 0),
+        Paint()
+          ..color = Colors.red.withOpacity(0.4) // Reduced from 0.7
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5, // Reduced from 2.0
+      );
+      
+      // Draw Y-axis
+      canvas.drawLine(
+        Offset(0, -originSize),
+        Offset(0, originSize),
+        Paint()
+          ..color = Colors.green.withOpacity(0.4) // Reduced from 0.7
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5, // Reduced from 2.0
       );
     }
   }
@@ -109,7 +204,10 @@ class DrawingCanvas extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<DrawingCanvas> createState() => _DrawingCanvasState();
+  State<DrawingCanvas> createState() {
+    print("Creating DrawingCanvas state with key: ${drawingCanvasKey}");
+    return _DrawingCanvasState();
+  }
 }
 
 class _DrawingCanvasState extends State<DrawingCanvas> {
@@ -316,20 +414,26 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         // Now pass toolbar height to the interactable widget
         return Stack(
           children: [
+            // Add CustomPaint to draw the grid
+            CustomPaint(
+              painter: GridPainter(
+                transform: transform,
+                gridColor: Colors.grey,
+                gridSpacing: _gridSpacing,
+                showGrid: _showGrid,
+              ),
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                color: Colors.transparent,
+              ),
+            ),
+            
             Listener(
               onPointerDown: (PointerDownEvent event) {
                 if (!mounted) return;
-                // Add debug message
-                print("🖐️ onPointerDown detected at ${event.localPosition}");
+                // Remove debug message and notification
                 
-                // Show an on-screen notification for debugging
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Touch detected at ${event.localPosition.dx.toStringAsFixed(2)}, ${event.localPosition.dy.toStringAsFixed(2)}'),
-                    duration: Duration(milliseconds: 500),
-                  ),
-                );
-
                 final Offset localPosition = event.localPosition;
 
                 _cancelMoveTimer();
@@ -689,6 +793,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     // Wait a bit more before dismissing to ensure the action is processed
                     Future.delayed(Duration(milliseconds: 50), () {
                       _dismissRadialMenu();
+                      
+                      // Reset element interaction state to prevent selection after radial menu
+                      setState(() {
+                        _elementBeingInteractedWith = null;
+                        _isSelectionInProgress = false;
+                      });
+                      
+                      // Force clear any selection that might have happened
+                      drawingProvider.clearSelection();
                     });
                   });
                   return;
@@ -836,27 +949,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Add a colorful border to visually indicate the interactive area
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: currentTool == ElementType.pen ? Colors.red : Colors.blue,
-                        width: 2.0,
-                      ),
-                    ),
-                  ),
-                  
-                  // Add the grid as a background layer
-                  RepaintBoundary(
-                    child: CustomPaint(
-                      painter: GridPainter(
-                        transform: widget.transformationController.value,
-                        showGrid: _showGrid,
-                        gridSpacing: _gridSpacing,
-                      ),
-                      size: Size.infinite,
-                    ),
-                  ),
+                  // Remove the colorful border decoration
+                  // Container(
+                  //   decoration: BoxDecoration(
+                  //     border: Border.all(
+                  //       color: currentTool == ElementType.pen ? Colors.red : Colors.blue,
+                  //       width: 2.0,
+                  //     ),
+                  //   ),
+                  // ),
                   
                   // Existing elements stack
                   ...elements.asMap().entries.map((entry) {
@@ -915,68 +1016,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                      ),
                 ],
               ),
-            ),
-            // Bottom floating button for adding elements
-            Consumer<DrawingProvider>(
-              builder: (context, provider, _) {
-                return Positioned(
-                  right: 16.0,
-                  bottom: 16.0,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Grid toggle button
-                      FloatingActionButton(
-                        heroTag: 'grid_toggle',
-                        mini: true,
-                        backgroundColor: _showGrid ? Colors.blue : Colors.grey,
-                        onPressed: () {
-                          setState(() {
-                            _showGrid = !_showGrid;
-                          });
-                          // Provide haptic feedback when toggling grid
-                          HapticFeedback.mediumImpact();
-                        },
-                        child: Icon(_showGrid ? Icons.grid_on : Icons.grid_off),
-                      ),
-                      const SizedBox(height: 8),
-                      // Pen tool button for testing
-                      FloatingActionButton(
-                        heroTag: 'pen_tool',
-                        mini: true,
-                        backgroundColor: currentTool == ElementType.pen ? Colors.green : Colors.grey,
-                        onPressed: () {
-                          if (currentTool == ElementType.pen) {
-                            drawingProvider.resetTool();
-                          } else {
-                            // Clear any active selections before switching to pen tool
-                            drawingProvider.clearSelection();
-                            drawingProvider.setTool(ElementType.pen);
-                          }
-                          // Show a message indicating the current tool
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(currentTool == ElementType.pen ? 'Selection Mode' : 'Pen Tool Active'),
-                              duration: Duration(seconds: 1),
-                            ),
-                          );
-                          HapticFeedback.mediumImpact();
-                        },
-                        child: Icon(currentTool == ElementType.pen ? Icons.pan_tool : Icons.edit),
-                      ),
-                      const SizedBox(height: 8),
-                      // Add element button
-                      FloatingActionButton(
-                        heroTag: 'add_element',
-                        onPressed: () {
-                          _showAddElementMenu(context);
-                        },
-                        child: const Icon(Icons.add),
-                      ),
-                    ],
-                  ),
-                );
-              },
             ),
           ],
         );
@@ -1190,6 +1229,31 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           ],
         );
       },
+    );
+  }
+
+  // Public method to toggle grid visibility from outside
+  void toggleGrid() {
+    setState(() {
+      _showGrid = !_showGrid;
+    });
+    // Provide haptic feedback
+    HapticFeedback.mediumImpact();
+    
+    // Show a brief confirmation message
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_showGrid ? 'Grid enabled' : 'Grid disabled'),
+        duration: const Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'OK',
+          onPressed: () {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          },
+        ),
+      ),
     );
   }
 }
