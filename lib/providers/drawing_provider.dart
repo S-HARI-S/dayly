@@ -52,23 +52,12 @@ class DrawingProvider extends ChangeNotifier {
   // Ensure proper initialization and clearer debug logging
   bool _showContextToolbar = false;
   bool get showContextToolbar {
-    final isVisible = _showContextToolbar && selectedElementIds.isNotEmpty;
-    return isVisible;
+    // Never show the context toolbar - removed from the UI
+    return false;
   }
 
   set showContextToolbar(bool value) {
-    if (_showContextToolbar != value) {
-      if (value && selectedElementIds.isEmpty) {
-        print("Warning: Attempting to show toolbar with no selected elements - ignoring");
-        _showContextToolbar = false;
-        notifyListeners();
-        return;
-      }
-
-      _showContextToolbar = value;
-      print("Context toolbar visibility set to: $value (selected elements: ${selectedElementIds.length})");
-      notifyListeners();
-    }
+    // No-op - context toolbar has been removed
   }
 
   // --- Tool and Style Management ---
@@ -576,6 +565,41 @@ class DrawingProvider extends ChangeNotifier {
     elements.removeWhere((element) => selectedElementIds.contains(element.id));
     clearSelection();
     notifyListeners();
+  }
+
+  // Direct delete method that doesn't require selection
+  void deleteElement(String elementId) {
+    print("Attempting to delete element with ID: $elementId");
+    
+    // Save current state to undo stack
+    saveToUndoStack();
+    
+    // Find and remove the element directly
+    final int index = elements.indexWhere((element) => element.id == elementId);
+    if (index >= 0) {
+      // Get the element information before deleting
+      final element = elements[index];
+      print("Found element to delete: ${element.type} at index $index");
+      
+      // Check if it's a video or other element that needs disposal
+      if (element is VideoElement) {
+        element.dispose();
+      }
+      
+      // Remove the element
+      elements.removeAt(index);
+      
+      // Also clear from selection if it's selected
+      if (selectedElementIds.contains(elementId)) {
+        selectedElementIds.remove(elementId);
+      }
+      
+      // Notify listeners about the change
+      notifyListeners();
+      print("Element $elementId deleted successfully");
+    } else {
+      print("ERROR: Could not find element $elementId to delete");
+    }
   }
 
   // --- Move Logic ---

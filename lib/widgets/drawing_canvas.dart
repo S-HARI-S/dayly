@@ -20,6 +20,83 @@ import '../models/image_element.dart'; // Add missing import for ImageElement
 import '../widgets/context_toolbar.dart';
 import '../widgets/bottom_floating_button.dart';
 import '../models/note_element.dart'; // Fixed missing quote
+import '../widgets/radial_menu.dart'; // Add import for RadialMenu
+
+// Add GridPainter class to draw the background grid
+class GridPainter extends CustomPainter {
+  final Matrix4 transform;
+  final Color gridColor;
+  final double gridSpacing;
+  final bool showGrid;
+  
+  GridPainter({
+    required this.transform,
+    this.gridColor = Colors.grey,
+    this.gridSpacing = 50.0,
+    this.showGrid = true,
+  });
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!showGrid) return;
+    
+    final paint = Paint()
+      ..color = gridColor.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5;
+    
+    // Get the scale factor from the transformation matrix
+    final double scale = transform.getMaxScaleOnAxis();
+    
+    // Calculate visible area in the canvas coordinate system
+    final Rect visibleRect = MatrixUtils.transformRect(
+      transform.clone()..invert(),
+      Rect.fromLTWH(0, 0, size.width, size.height),
+    );
+    
+    // Adjust grid spacing based on zoom level for better visibility
+    double effectiveSpacing = gridSpacing;
+    
+    // Make grid more dense when zoomed out, less dense when zoomed in
+    if (scale < 0.5) {
+      effectiveSpacing = gridSpacing * 2;
+    } else if (scale > 2.0) {
+      effectiveSpacing = gridSpacing / 2;
+    }
+    
+    // Calculate grid boundaries
+    final double left = (visibleRect.left / effectiveSpacing).floor() * effectiveSpacing;
+    final double top = (visibleRect.top / effectiveSpacing).floor() * effectiveSpacing;
+    final double right = (visibleRect.right / effectiveSpacing).ceil() * effectiveSpacing;
+    final double bottom = (visibleRect.bottom / effectiveSpacing).ceil() * effectiveSpacing;
+    
+    // Draw vertical lines
+    for (double x = left; x <= right; x += effectiveSpacing) {
+      canvas.drawLine(
+        Offset(x, top),
+        Offset(x, bottom),
+        paint,
+      );
+    }
+    
+    // Draw horizontal lines
+    for (double y = top; y <= bottom; y += effectiveSpacing) {
+      canvas.drawLine(
+        Offset(left, y),
+        Offset(right, y),
+        paint,
+      );
+    }
+  }
+  
+  @override
+  bool shouldRepaint(covariant GridPainter oldDelegate) {
+    return oldDelegate.transform != transform ||
+           oldDelegate.gridColor != gridColor ||
+           oldDelegate.gridSpacing != gridSpacing ||
+           oldDelegate.showGrid != showGrid;
+  }
+}
 
 class DrawingCanvas extends StatefulWidget {
   final TransformationController transformationController;
@@ -40,6 +117,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   int _activePointers = 0; 
   Timer? _moveDelayTimer; 
   Timer? _longPressTimer; // Add timer for tap-and-hold selection
+  Timer? _radialMenuTimer; // Timer specifically for radial menu
   bool _isMovingElement = false;
   Offset? _potentialInteractionStartPosition; 
   Offset? _lastInteractionPosition;
@@ -48,9 +126,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool _isSelectionInProgress = false; // Track if we're in selection mode
   ResizeHandleType? _draggedHandle;
   DrawingElement? _elementBeingInteractedWith;
-  static const Duration longPressDuration = Duration(milliseconds: 350); // Slightly longer for clearer intent
-  static const double moveCancelThreshold = 10.0;
+  static const Duration longPressDuration = Duration(milliseconds: 350); // Regular selection duration
+  static const Duration radialMenuDuration = Duration(milliseconds: 1000); // Longer duration for radial menu
+  static const double moveCancelThreshold = 10.0; // Threshold to determine if user is moving
   static const double animationScale = 1.05; // Scale factor for selection pop effect
+
+  // State for RadialMenu display
+  OverlayEntry? _radialMenuOverlay;
+  bool _isRadialMenuShowing = false;
+  int? _radialMenuActivePointer; // Track which pointer activated the radial menu
 
   // Add state for toolbar height
   double _toolbarHeight = 0.0;
@@ -77,6 +161,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
            drawingProvider.currentTool != ElementType.none;
   }
 
+  // Add a flag to toggle grid visibility
+  bool _showGrid = true;
+  
+  // Grid spacing
+  double _gridSpacing = 50.0;
+
   // Add variables to track multiple pointers for rotation
   final Map<int, Offset> _activePointerPositions = {};
   Offset? _rotationReferencePoint;
@@ -97,6 +187,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   void _cancelLongPressTimer() {
     _longPressTimer?.cancel();
     _longPressTimer = null;
+  }
+
+  void _cancelRadialMenuTimer() {
+    _radialMenuTimer?.cancel();
+    _radialMenuTimer = null;
   }
   
   ResizeHandleType? _hitTestHandles(DrawingElement element, Offset point, double inverseScale) {
@@ -139,47 +234,107 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return angle;
   }
 
+  // Method to show the RadialMenu for a selected element
+  void _showRadialMenu(BuildContext context, DrawingProvider provider, DrawingElement element, Offset position) {
+    // First dismiss any existing menu
+    _dismissRadialMenu();
+
+    try {
+      print("Creating RadialMenu overlay at position: $position");
+      // Create a new overlay entry
+      _radialMenuOverlay = OverlayEntry(
+        builder: (context) => RadialMenu(
+          position: position,
+          element: element,
+          provider: provider,
+          onDismiss: _dismissRadialMenu,
+          parentContext: context,
+        ),
+      );
+
+      // Add the overlay to the current context
+      Overlay.of(context).insert(_radialMenuOverlay!);
+      _isRadialMenuShowing = true;
+      print("RadialMenu overlay inserted successfully");
+      
+      // Ensure the haptic feedback happens
+      HapticFeedback.heavyImpact();
+    } catch (e) {
+      print("Error showing radial menu: $e");
+      // If an error occurs, make sure we don't leave the state hanging
+      _dismissRadialMenu();
+    }
+  }
+
+  // Method to dismiss the RadialMenu
+  void _dismissRadialMenu() {
+    print("Attempting to dismiss radial menu, isShowing: $_isRadialMenuShowing");
+    if (_radialMenuOverlay != null) {
+      try {
+        _radialMenuOverlay!.remove();
+        print("Radial menu dismissed successfully");
+      } catch (e) {
+        print("Error dismissing radial menu: $e");
+      } finally {
+        _radialMenuOverlay = null;
+        _isRadialMenuShowing = false;
+        _radialMenuActivePointer = null;
+        
+        // Reset active pointers and interaction state to ensure clean state
+        _activePointers = 0;
+        _activePointerPositions.clear();
+        _potentialInteractionStartPosition = null;
+        _lastInteractionPosition = null;
+        _isMovingElement = false;
+        _isResizingElement = false;
+        _isRotatingElement = false;
+        _isSelectionInProgress = false;
+        _elementBeingInteractedWith = null;
+      }
+    }
+  }
+
   @override
   void dispose() { 
     _cancelMoveTimer();
     _cancelLongPressTimer();
+    _cancelRadialMenuTimer();
+    _dismissRadialMenu(); // Make sure to dismiss any active radial menu
     super.dispose(); 
   }
 
   @override
   Widget build(BuildContext context) {
-    final drawingProvider = Provider.of<DrawingProvider>(context, listen: false);
-
-    return Selector<DrawingProvider,
-        ({List<DrawingElement> elements, List<String> selectedElementIds, DrawingElement? current})>(
-      selector: (_, provider) => (
-        elements: provider.elements,
-        selectedElementIds: provider.selectedElementIds,
-        current: provider.currentElement
-      ),
-      shouldRebuild: (previous, next) {
-        final elementsChanged = !identical(previous.elements, next.elements) ||
-                                !listEquals(previous.elements, next.elements);
-        final selectionChanged = !listEquals(previous.selectedElementIds, next.selectedElementIds);
-        final currentChanged = previous.current != next.current;
-        return elementsChanged || selectionChanged || currentChanged;
-      },
-      builder: (context, data, child) {
-        final currentElements = data.elements;
-        final selectedIds = data.selectedElementIds;
-        final currentDrawingElement = data.current;
+    return Consumer<DrawingProvider>(
+      builder: (context, drawingProvider, child) {
+        final currentDrawingElement = drawingProvider.currentElement;
+        final elements = drawingProvider.elements;
+        final selectedElementIds = drawingProvider.selectedElementIds;
+        final currentTool = drawingProvider.currentTool;
         final transform = widget.transformationController.value;
-
+        
+        // Now pass toolbar height to the interactable widget
         return Stack(
-          fit: StackFit.expand,
           children: [
             Listener(
               onPointerDown: (PointerDownEvent event) {
                 if (!mounted) return;
+                // Add debug message
+                print("🖐️ onPointerDown detected at ${event.localPosition}");
+                
+                // Show an on-screen notification for debugging
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Touch detected at ${event.localPosition.dx.toStringAsFixed(2)}, ${event.localPosition.dy.toStringAsFixed(2)}'),
+                    duration: Duration(milliseconds: 500),
+                  ),
+                );
+
                 final Offset localPosition = event.localPosition;
 
                 _cancelMoveTimer();
                 _cancelLongPressTimer();
+                _cancelRadialMenuTimer();
                 
                 // Store the pointer position with its unique ID
                 _activePointerPositions[event.pointer] = localPosition;
@@ -194,7 +349,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 // Check if we have exactly two pointers and an element is selected
                 if (_activePointers == 2 && drawingProvider.selectedElementIds.length == 1) {
                   final selectedElementId = drawingProvider.selectedElementIds.first;
-                  final selectedElement = currentElements.firstWhereOrNull(
+                  final selectedElement = elements.firstWhereOrNull(
                     (el) => el.id == selectedElementId
                   );
                   
@@ -238,54 +393,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     HapticFeedback.mediumImpact();
                     return;
                   }
-                }
+                } else if (_activePointers == 1) {
+                  final currentTool = drawingProvider.currentTool;
                 
-                if (_activePointers > 1 || widget.isInteracting) return;
-                HapticFeedback.lightImpact();
-                
-                final currentTool = drawingProvider.currentTool;
-
-                // Direct handling for pen tool to ensure drawing starts immediately
-                if (currentTool == ElementType.pen) {
-                  // Start drawing immediately
-                  drawingProvider.startDrawing(localPosition);
-                } else if (currentTool != ElementType.none) {
-                  DrawingElement? hitElement = currentElements.lastWhereOrNull(
-                    (el) => el.containsPoint(localPosition)
-                  );
-
-                  if (hitElement != null) {
-                    _longPressTimer = Timer(longPressDuration, () {
-                      if (!mounted) return;
-                      
-                      setState(() { 
-                        _isSelectionInProgress = true;
-                        _elementBeingInteractedWith = hitElement;
-                      });
-                      
-                      HapticFeedback.mediumImpact();
-                      drawingProvider.selectElement(hitElement);
-                      drawingProvider.showContextToolbar = true;
-                      
-                      _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
-                        if (!mounted || _elementBeingInteractedWith == null) return;
-                        
-                        setState(() { 
-                          _isMovingElement = true; 
-                        });
-                        
-                        drawingProvider.startPotentialMove();
-                      });
-                    });
-                  } else if (currentTool == ElementType.text) {
-                    _showTextDialog(context, drawingProvider, localPosition);
-                  }
-                } else {
-                  bool actionTaken = false;
-                  
-                  if (selectedIds.length == 1) {
-                    final selectedElement = currentElements.firstWhereOrNull(
-                      (el) => el.id == selectedIds.first
+                  // Check if any handle is being touched
+                  if (drawingProvider.selectedElementIds.length == 1 && currentTool == ElementType.none) {
+                    final selectedElement = elements.firstWhereOrNull(
+                      (el) => el.id == selectedElementIds.first
                     );
                     
                     if (selectedElement != null) {
@@ -312,33 +426,38 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                         }
                         
                         HapticFeedback.mediumImpact();
-                        actionTaken = true;
+                        return; // Exit early since we're handling a resize
                       }
                     }
                   }
                   
-                  if (!actionTaken) {
-                    DrawingElement? hitElement = currentElements.lastWhereOrNull(
+                  // If not handling resize, check if we're clicking on an element
+                  if (currentTool == ElementType.none) {
+                    DrawingElement? hitElement = elements.lastWhereOrNull(
                       (el) => el.containsPoint(localPosition)
                     );
                     
                     if (hitElement != null) {
+                      // Set the element being interacted with
                       setState(() {
                         _elementBeingInteractedWith = hitElement;
                       });
                       
+                      // Regular selection timer (shorter)
                       _longPressTimer = Timer(longPressDuration, () {
-                        if (!mounted || _elementBeingInteractedWith == null) return;
+                        if (!mounted) return;
                         
                         setState(() { 
                           _isSelectionInProgress = true;
                         });
                         
-                        drawingProvider.clearSelection(notify: false);
-                        drawingProvider.selectElement(hitElement);
-                        drawingProvider.showContextToolbar = true;
+                        // Clear current selection if we're in selection mode
+                        if (currentTool == ElementType.none) {
+                          drawingProvider.clearSelection(notify: false);
+                        }
                         
-                        HapticFeedback.mediumImpact(); 
+                        HapticFeedback.mediumImpact();
+                        drawingProvider.selectElement(hitElement);
                         
                         _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
                           if (!mounted || _elementBeingInteractedWith == null) return;
@@ -349,15 +468,67 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                           
                           drawingProvider.startPotentialMove();
                         });
+
+                        // Give immediate feedback that we're waiting for radial menu
+                        HapticFeedback.lightImpact();
+                        print("Started waiting for radial menu - will trigger in ${radialMenuDuration.inMilliseconds}ms");
                       });
                       
-                      actionTaken = true;
+                      // Radial menu timer (longer) - only start if we're not already moving
+                      _radialMenuTimer = Timer(radialMenuDuration, () {
+                        print("Radial menu timer fired");
+                        // Only show radial menu if user hasn't moved significantly
+                        if (!mounted) {
+                          print("Not mounted, can't show radial menu");
+                          return;
+                        }
+                        
+                        if (_elementBeingInteractedWith == null) {
+                          print("No element being interacted with");
+                          return;
+                        }
+                        
+                        final currentPosition = _activePointerPositions[event.pointer];
+                        if (currentPosition == null) {
+                          print("Current position is null");
+                          return;
+                        }
+                        
+                        // Check if finger has moved significantly
+                        final distance = (currentPosition - localPosition).distance;
+                        print("Finger moved distance: $distance (threshold: $moveCancelThreshold)");
+                        if (distance > moveCancelThreshold * 2) { // Increased threshold
+                          // User has moved - don't show radial menu
+                          print("User moved too much, not showing radial menu");
+                          return;
+                        }
+                        
+                        // Cancel movement if radial menu is showing
+                        _cancelMoveTimer();
+                        setState(() { 
+                          _isMovingElement = false;
+                          _radialMenuActivePointer = event.pointer;
+                        });
+                        
+                        print("About to show radial menu");
+                        HapticFeedback.heavyImpact();
+                        
+                        // Show radial menu at the touch point
+                        final RenderBox box = context.findRenderObject() as RenderBox;
+                        final Offset globalPosition = box.localToGlobal(localPosition);
+                        _showRadialMenu(context, drawingProvider, hitElement, globalPosition);
+                      });
+                    } else {
+                      // Tapped on empty space, clear selection
+                      drawingProvider.clearSelection();
                     }
-                  }
-                  
-                  if (!actionTaken) {
-                    drawingProvider.clearSelection();
-                    drawingProvider.showContextToolbar = false;
+                  } else if (currentTool == ElementType.pen) {
+                    // Start drawing immediately
+                    drawingProvider.startDrawing(localPosition);
+                  } else if (currentTool == ElementType.text) {
+                    // Immediately show the text dialog at the tap location
+                    _showTextDialog(context, drawingProvider, localPosition);
+                    // After text dialog completes, it will reset the tool
                   }
                 }
               },
@@ -365,8 +536,32 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerMove: (PointerMoveEvent event) {
                 if (!mounted) return;
                 
+                final prevPosition = _activePointerPositions[event.pointer];
+                
                 // Update the position of this pointer
                 _activePointerPositions[event.pointer] = event.localPosition;
+                
+                // If this pointer initiated the radial menu, let the menu handle it
+                if (_isRadialMenuShowing && _radialMenuActivePointer == event.pointer) {
+                  // Instead of just returning, pass the movement to the radial menu
+                  if (_radialMenuOverlay != null) {
+                    // Get the global position for the radial menu
+                    final RenderBox box = context.findRenderObject() as RenderBox;
+                    final Offset globalPosition = box.localToGlobal(event.localPosition);
+                    // Update radial menu with the new position
+                    RadialMenuController.instance.updatePointerPosition(globalPosition);
+                  }
+                  return;
+                }
+                
+                // If user moved finger significantly before radial menu appeared, cancel the radial menu timer
+                if (_radialMenuTimer != null && prevPosition != null && !_isRadialMenuShowing) {
+                  final distance = (event.localPosition - prevPosition).distance;
+                  if (distance > moveCancelThreshold) {
+                    print("Canceling radial menu timer due to movement: $distance");
+                    _cancelRadialMenuTimer();
+                  }
+                }
                 
                 // Handle two-finger rotation and scaling specifically
                 if (_activePointers == 2 && _isRotatingElement && _elementBeingInteractedWith != null) {
@@ -420,6 +615,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 // Check if we're currently drawing with the pen tool
                 if (currentTool == ElementType.pen && drawingProvider.currentElement != null) {
                   // If we're already drawing, keep updating the drawing
+                  print("✏️ Drawing with pen at ${localPosition}");
                   drawingProvider.updateDrawing(localPosition);
                   _cancelLongPressTimer(); // Cancel any pending selection if we're actively drawing
                 } else if (_longPressTimer?.isActive ?? false) {
@@ -468,11 +664,37 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerUp: (PointerUpEvent event) {
                 if (!mounted) return;
                 
-                // Remove this pointer from our tracking map
+                // Remove the pointer from the active pointers
                 _activePointerPositions.remove(event.pointer);
                 
-                _cancelMoveTimer();
-                _cancelLongPressTimer();
+                _cancelLongPressTimer(); // Always clear the long-press timer on pointer up
+                _cancelMoveTimer(); // Cancel move timer too for safety
+                _cancelRadialMenuTimer(); // Cancel radial menu timer
+                
+                // If this is the pointer that triggered the radial menu, handle selection
+                if (_isRadialMenuShowing && _radialMenuActivePointer == event.pointer) {
+                  // Get the global position for the radial menu
+                  final RenderBox box = context.findRenderObject() as RenderBox;
+                  final Offset globalPosition = box.localToGlobal(event.localPosition);
+                  
+                  // Tell the radial menu to update with the final position
+                  RadialMenuController.instance.updatePointerPosition(globalPosition);
+                  
+                  // Wait a tiny bit for the state to update
+                  Future.delayed(Duration(milliseconds: 10), () {
+                    // Trigger the selected action
+                    print("Triggering radial menu action from pointer up");
+                    RadialMenuController.instance.triggerAction();
+                    
+                    // Wait a bit more before dismissing to ensure the action is processed
+                    Future.delayed(Duration(milliseconds: 50), () {
+                      _dismissRadialMenu();
+                    });
+                  });
+                  return;
+                }
+                
+                setState(() { _activePointers--; });
                 
                 final Offset upPosition = event.localPosition;
                 final tapPosition = _potentialInteractionStartPosition ?? upPosition;
@@ -483,11 +705,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 bool wasSelecting = _isSelectionInProgress;
                 DrawingElement? interactedElement = _elementBeingInteractedWith;
 
-                // Decrease active pointer count
-                setState(() { 
-                  _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
-                });
-                
                 // If we drop to 0 or 1 pointer while rotating, end the rotation
                 if (wasRotating && _activePointers < 2) {
                   // End rotation mode completely
@@ -503,6 +720,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   drawingProvider.endPotentialTransformation();
                   drawingProvider.clearSelection();
                   return; // Exit to prevent further processing
+                }
+                
+                // Specifically check if a pen stroke is active and needs to be finalized
+                if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
+                  drawingProvider.endDrawing(); // This now resets the tool to selection mode
+                  return; // Early return to avoid other handlers
                 }
                 
                 // If pointer count drops to zero, end all operations
@@ -522,12 +745,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   _lastInteractionPosition = null; 
                   _potentialInteractionStartPosition = null;
 
-                  // Specifically check if a pen stroke is active and needs to be finalized
-                  if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
-                    drawingProvider.endDrawing(); // This now resets the tool to selection mode
-                    return; // Early return to avoid other handlers
-                  }
-                  
                   if (wasResizing) { 
                     drawingProvider.endPotentialResize();
                     drawingProvider.clearSelection();
@@ -539,7 +756,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     drawingProvider.clearSelection(); 
                   } else if (interactedElement != null && !wasSelecting) {
                     // Handle interaction with specific element types
-                    if (selectedIds.contains(interactedElement.id)) {
+                    if (selectedElementIds.contains(interactedElement.id)) {
                       // Handle taps on already selected elements
                       if (interactedElement is VideoElement) {
                         drawingProvider.toggleVideoPlayback(interactedElement.id);
@@ -560,12 +777,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     } else {
                       // Briefly select the element then clear after a short delay
                       drawingProvider.selectElement(interactedElement);
-                      drawingProvider.showContextToolbar = true;
-                      Future.delayed(Duration(milliseconds: 100), () {
-                        if (mounted) {
-                          drawingProvider.clearSelection();
-                        }
-                      });
+                      drawingProvider.clearSelection();
                     }
                   }
                 }
@@ -579,6 +791,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 
                 _cancelMoveTimer(); 
                 _cancelLongPressTimer();
+                _cancelRadialMenuTimer();
+                
+                // If this is the pointer that initiated the radial menu, dismiss it
+                if (_radialMenuActivePointer == event.pointer) {
+                  _dismissRadialMenu();
+                  _radialMenuActivePointer = null;
+                }
+                
                 bool wasMoving = _isMovingElement;
                 bool wasResizing = _isResizingElement;
                 bool wasRotating = _isRotatingElement;
@@ -612,85 +832,49 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 _lastInteractionPosition = null;
                 _potentialInteractionStartPosition = null;
               },
-              behavior: HitTestBehavior.opaque,
+              behavior: HitTestBehavior.translucent,
               child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  ...List.generate(currentElements.length, (index) {
-                    final element = currentElements[index];
-                    final bool isSelected = selectedIds.contains(element.id);
-                    final bool isBeingInteracted = _elementBeingInteractedWith?.id == element.id;
-                    final bool shouldAnimate = isSelected && isBeingInteracted && _isSelectionInProgress;
-                    List<Widget> elementWidgets = [];
-                    Widget elementWidget;
-                    if (element is GifElement) {
-                      final bounds = element.bounds;
-                      elementWidget = Positioned(
-                        left: bounds.left,
-                        top: bounds.top,
-                        width: bounds.width,
-                        height: bounds.height,
-                        child: Transform.rotate(
-                          angle: element.rotation,
-                          child: Image.network(
-                            element.gifUrl,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Container(
-                                color: Colors.grey.withOpacity(0.3),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    value: loadingProgress.expectedTotalBytes != null
-                                        ? loadingProgress.cumulativeBytesLoaded / 
-                                            loadingProgress.expectedTotalBytes!
-                                        : null,
-                                  ),
-                                ),
-                              );
-                            },
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: Colors.grey.withOpacity(0.3),
-                                child: const Center(
-                                  child: Text("Error loading GIF", 
-                                    style: TextStyle(color: Colors.red)),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    } else if (element is VideoElement) {
-                      final bounds = element.bounds;
-                      if (!element.controller.value.isInitialized) {
-                        elementWidget = Positioned(
-                          left: bounds.left,
-                          top: bounds.top,
-                          width: bounds.width,
-                          height: bounds.height,
-                          child: Container(
-                              color: Colors.black,
-                              child: const Center(child: CircularProgressIndicator())),
-                        );
-                      } else {
-                        elementWidget = Positioned(
-                          left: bounds.left,
-                          top: bounds.top,
-                          width: bounds.width,
-                          height: bounds.height,
-                          child: IgnorePointer(
-                            child: VideoPlayer(element.controller),
-                          ),
-                        );
-                      }
-                    } else {
-                      elementWidget = RepaintBoundary(
-                        child: CustomPaint(
-                          painter: ElementPainter(element: element, currentTransform: transform),
-                          size: Size.infinite,
-                        ),
-                      );
-                    }
+                  // Add a colorful border to visually indicate the interactive area
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: currentTool == ElementType.pen ? Colors.red : Colors.blue,
+                        width: 2.0,
+                      ),
+                    ),
+                  ),
+                  
+                  // Add the grid as a background layer
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      painter: GridPainter(
+                        transform: widget.transformationController.value,
+                        showGrid: _showGrid,
+                        gridSpacing: _gridSpacing,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  ),
+                  
+                  // Existing elements stack
+                  ...elements.asMap().entries.map((entry) {
+                    final int index = entry.key;
+                    final element = entry.value;
+                    final isSelected = selectedElementIds.contains(element.id);
+                    final shouldAnimate = element.id == _elementBeingInteractedWith?.id && 
+                                         (_isResizingElement || _isRotatingElement);
+                    
+                    final List<Widget> elementWidgets = [];
+                    
+                    final elementWidget = RepaintBoundary(
+                      child: CustomPaint(
+                        painter: ElementPainter(element: element, currentTransform: transform),
+                        size: Size.infinite,
+                      ),
+                    );
+                    
                     elementWidgets.add(
                       shouldAnimate
                         ? TweenAnimationBuilder<double>(
@@ -732,39 +916,65 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 ],
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Consumer<DrawingProvider>(
-                  builder: (context, provider, _) {
-                    final isVisible = provider.showContextToolbar;
-                    return ContextToolbar(
-                      key: const ValueKey('contextToolbar'),
-                      isVisible: isVisible,
-                      onHeightChanged: (height) {
-                        if (mounted) {
-                          setState(() {
-                            _toolbarHeight = height;
-                          });
-                        }
-                      },
-                    );
-                  },
-                ),
-              ),
-            ),
+            // Bottom floating button for adding elements
             Consumer<DrawingProvider>(
               builder: (context, provider, _) {
-                final toolbarOffset = provider.showContextToolbar ? _toolbarHeight : 0.0;
-                return BottomFloatingButton(
-                  bottomOffset: toolbarOffset,
-                  onPressed: () {
-                    _showAddElementMenu(context);
-                  },
-                  child: const Icon(Icons.add),
+                return Positioned(
+                  right: 16.0,
+                  bottom: 16.0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Grid toggle button
+                      FloatingActionButton(
+                        heroTag: 'grid_toggle',
+                        mini: true,
+                        backgroundColor: _showGrid ? Colors.blue : Colors.grey,
+                        onPressed: () {
+                          setState(() {
+                            _showGrid = !_showGrid;
+                          });
+                          // Provide haptic feedback when toggling grid
+                          HapticFeedback.mediumImpact();
+                        },
+                        child: Icon(_showGrid ? Icons.grid_on : Icons.grid_off),
+                      ),
+                      const SizedBox(height: 8),
+                      // Pen tool button for testing
+                      FloatingActionButton(
+                        heroTag: 'pen_tool',
+                        mini: true,
+                        backgroundColor: currentTool == ElementType.pen ? Colors.green : Colors.grey,
+                        onPressed: () {
+                          if (currentTool == ElementType.pen) {
+                            drawingProvider.resetTool();
+                          } else {
+                            // Clear any active selections before switching to pen tool
+                            drawingProvider.clearSelection();
+                            drawingProvider.setTool(ElementType.pen);
+                          }
+                          // Show a message indicating the current tool
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(currentTool == ElementType.pen ? 'Selection Mode' : 'Pen Tool Active'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                          HapticFeedback.mediumImpact();
+                        },
+                        child: Icon(currentTool == ElementType.pen ? Icons.pan_tool : Icons.edit),
+                      ),
+                      const SizedBox(height: 8),
+                      // Add element button
+                      FloatingActionButton(
+                        heroTag: 'add_element',
+                        onPressed: () {
+                          _showAddElementMenu(context);
+                        },
+                        child: const Icon(Icons.add),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -863,7 +1073,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       final Matrix4 inverseMatrix = Matrix4.inverted(widget.transformationController.value);
       return MatrixUtils.transformPoint(inverseMatrix, screenCenter);
     } catch (e) {
-      return const Offset(50000, 50000);
+      print("Error inverting transformation matrix: $e");
+      // Return the center of the screen without transformation instead of extreme values
+      return screenCenter;
     }
   }
 
