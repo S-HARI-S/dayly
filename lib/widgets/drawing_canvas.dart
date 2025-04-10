@@ -501,66 +501,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   });
                   
                   drawingProvider.endPotentialTransformation();
+                  drawingProvider.clearSelection(); 
+                  return; // Exit to prevent further processing
                 }
                 
                 // If pointer count drops to zero, end all operations
                 if (_activePointers == 0 && !widget.isInteracting) {
-                  setState(() {
-                    _isMovingElement = false; 
-                    _isResizingElement = false;
-                    _isSelectionInProgress = false;
-                    _draggedHandle = null;
-                    _elementBeingInteractedWith = null;
-                    _initialRotationVector = null;
-                    _startRotationAngle = null;
-                    _rotationReferencePoint = null;
-                    _initialElementSize = null;
-                  });
-                  
-                  _lastInteractionPosition = null; 
-                  _potentialInteractionStartPosition = null;
-
-                  // Specifically check if a pen stroke is active and needs to be finalized
-                  if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
-                    drawingProvider.endDrawing();
-                    return; // Early return to avoid other handlers
-                  }
-                  
-                  if (wasResizing) { 
-                    drawingProvider.endPotentialResize();
-                    drawingProvider.clearSelection();
-                  } else if (wasMoving) { 
-                    drawingProvider.endPotentialMove();
-                    drawingProvider.clearSelection();
-                  } else if (wasRotating) { 
-                    drawingProvider.endPotentialRotation();
-                    drawingProvider.clearSelection(); 
-                  } else if (interactedElement != null && !wasSelecting) {
-                    if (selectedIds.contains(interactedElement.id)) {
-                      if (interactedElement is VideoElement) {
-                        drawingProvider.toggleVideoPlayback(interactedElement.id);
-                        drawingProvider.clearSelection();
-                      } else if (interactedElement is NoteElement) {
-                        final now = DateTime.now();
-                        if (_lastTapTime != null && now.difference(_lastTapTime!).inMilliseconds < 500) {
-                          _showNoteEditDialog(context, drawingProvider, interactedElement);
-                        }
-                        _lastTapTime = now;
-                        drawingProvider.clearSelection();
-                      } else if (interactedElement is TextElement) {
-                        _showTextDialog(context, drawingProvider, tapPosition, existingText: interactedElement);
-                        drawingProvider.clearSelection();
-                      } else {
-                        drawingProvider.clearSelection();
-                      }
-                    } else {
-                      drawingProvider.selectElement(interactedElement);
-                      drawingProvider.showContextToolbar = true;
-                      Future.delayed(Duration(milliseconds: 100), () {
-                        drawingProvider.clearSelection();
-                      });
-                    }
-                  }
+                  // ...existing code...
                 }
               },
 
@@ -575,15 +522,20 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 bool wasMoving = _isMovingElement;
                 bool wasResizing = _isResizingElement;
                 bool wasRotating = _isRotatingElement;
+                
                 if (drawingProvider.currentTool == ElementType.pen && currentDrawingElement != null) {
                   drawingProvider.discardDrawing();
                 } else if (wasResizing) { 
-                  drawingProvider.endPotentialResize(); 
+                  drawingProvider.endPotentialResize();
+                  drawingProvider.clearSelection(); // Add immediate clearSelection
                 } else if (wasMoving) { 
-                  drawingProvider.endPotentialMove(); 
+                  drawingProvider.endPotentialMove();
+                  drawingProvider.clearSelection(); // Add immediate clearSelection
                 } else if (wasRotating) { 
                   drawingProvider.endPotentialRotation();
+                  drawingProvider.clearSelection(); // Add immediate clearSelection
                 }
+                
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
                   _isMovingElement = false; 
@@ -872,6 +824,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 provider.clearSelection();
               } else {
                 provider.addTextElement(t, position);
+                // No need to select the newly added element
               }
               Navigator.of(context).pop();
             }
@@ -894,6 +847,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   provider.clearSelection();
                 } else {
                   provider.addTextElement(controller.text, position);
+                  // No need to select the newly added element
                 }
                 Navigator.of(context).pop();
               }

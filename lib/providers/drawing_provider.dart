@@ -314,9 +314,7 @@ class DrawingProvider extends ChangeNotifier {
       elements.add(newGifElement);
       print("    Added GifElement to list. Total elements now: ${elements.length}");
 
-      print("    Clearing selection and selecting new GIF...");
-      clearSelection();
-      selectElement(newGifElement);
+      clearSelection(); // Don't select the newly added GIF
       print("    Calling notifyListeners()...");
       notifyListeners();
 
@@ -363,8 +361,7 @@ class DrawingProvider extends ChangeNotifier {
       );
 
       elements.add(newImage);
-      clearSelection();
-      selectElement(newImage);
+      clearSelection(); // Don't select the newly added image
       
       // Reset to interaction mode after adding image
       setTool(ElementType.none);
@@ -407,8 +404,7 @@ class DrawingProvider extends ChangeNotifier {
       );
 
       elements.add(newVideoElement);
-      clearSelection();
-      selectElement(newVideoElement);
+      clearSelection(); // Don't select the newly added video
       
       // Reset to interaction mode after adding video
       setTool(ElementType.none);
@@ -446,8 +442,7 @@ class DrawingProvider extends ChangeNotifier {
     );
 
     elements.add(newText);
-    clearSelection();
-    selectElement(newText);
+    clearSelection(); // Remove selection of the new element
     
     // Reset to interaction mode after adding text
     setTool(ElementType.none);
@@ -1045,9 +1040,8 @@ class DrawingProvider extends ChangeNotifier {
     );
 
     elements.add(newNote);
-    clearSelection(notify: false);
-    selectElement(newNote);
-    showContextToolbar = true;
+    clearSelection();
+    showContextToolbar = false; // Make sure toolbar is hidden
     
     // Reset to interaction mode after creating note
     setTool(ElementType.none);
