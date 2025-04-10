@@ -501,13 +501,73 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   });
                   
                   drawingProvider.endPotentialTransformation();
-                  drawingProvider.clearSelection(); 
+                  drawingProvider.clearSelection();
                   return; // Exit to prevent further processing
                 }
                 
                 // If pointer count drops to zero, end all operations
                 if (_activePointers == 0 && !widget.isInteracting) {
-                  // ...existing code...
+                  setState(() {
+                    _isMovingElement = false; 
+                    _isResizingElement = false;
+                    _isSelectionInProgress = false;
+                    _draggedHandle = null;
+                    _elementBeingInteractedWith = null;
+                    _initialRotationVector = null;
+                    _startRotationAngle = null;
+                    _rotationReferencePoint = null;
+                    _initialElementSize = null;
+                  });
+                  
+                  _lastInteractionPosition = null; 
+                  _potentialInteractionStartPosition = null;
+
+                  // Specifically check if a pen stroke is active and needs to be finalized
+                  if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
+                    drawingProvider.endDrawing(); // This now resets the tool to selection mode
+                    return; // Early return to avoid other handlers
+                  }
+                  
+                  if (wasResizing) { 
+                    drawingProvider.endPotentialResize();
+                    drawingProvider.clearSelection();
+                  } else if (wasMoving) { 
+                    drawingProvider.endPotentialMove();
+                    drawingProvider.clearSelection();
+                  } else if (wasRotating) { 
+                    drawingProvider.endPotentialRotation();
+                    drawingProvider.clearSelection(); 
+                  } else if (interactedElement != null && !wasSelecting) {
+                    // Handle interaction with specific element types
+                    if (selectedIds.contains(interactedElement.id)) {
+                      // Handle taps on already selected elements
+                      if (interactedElement is VideoElement) {
+                        drawingProvider.toggleVideoPlayback(interactedElement.id);
+                        drawingProvider.clearSelection();
+                      } else if (interactedElement is NoteElement) {
+                        final now = DateTime.now();
+                        if (_lastTapTime != null && now.difference(_lastTapTime!).inMilliseconds < 500) {
+                          _showNoteEditDialog(context, drawingProvider, interactedElement);
+                        }
+                        _lastTapTime = now;
+                        drawingProvider.clearSelection();
+                      } else if (interactedElement is TextElement) {
+                        _showTextDialog(context, drawingProvider, tapPosition, existingText: interactedElement);
+                        drawingProvider.clearSelection();
+                      } else {
+                        drawingProvider.clearSelection();
+                      }
+                    } else {
+                      // Briefly select the element then clear after a short delay
+                      drawingProvider.selectElement(interactedElement);
+                      drawingProvider.showContextToolbar = true;
+                      Future.delayed(Duration(milliseconds: 100), () {
+                        if (mounted) {
+                          drawingProvider.clearSelection();
+                        }
+                      });
+                    }
+                  }
                 }
               },
 
@@ -819,14 +879,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           decoration: const InputDecoration(hintText: "Type here..."),
           onSubmitted: (t) {
             if (t.trim().isNotEmpty) {
+              // Handle submit via Enter key
+              Navigator.of(context).pop();
               if (existingText != null) {
                 provider.updateSelectedElementProperties({'text': t});
                 provider.clearSelection();
               } else {
                 provider.addTextElement(t, position);
-                // No need to select the newly added element
               }
-              Navigator.of(context).pop();
             }
           },
         ),
@@ -834,7 +894,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              provider.resetTool();
+              provider.resetTool(); // Explicitly reset the tool
               provider.clearSelection();
             },
             child: const Text("Cancel"),
@@ -842,14 +902,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           TextButton(
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
+                Navigator.of(context).pop(); // Close dialog first to avoid UI issues
+                
                 if (existingText != null) {
                   provider.updateSelectedElementProperties({'text': controller.text});
                   provider.clearSelection();
                 } else {
                   provider.addTextElement(controller.text, position);
-                  // No need to select the newly added element
                 }
-                Navigator.of(context).pop();
               }
             },
             child: Text(existingText != null ? "Update" : "Add"),

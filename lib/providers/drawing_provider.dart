@@ -441,18 +441,28 @@ class DrawingProvider extends ChangeNotifier {
       fontSize: 24.0,
     );
 
-    elements.add(newText);
-    clearSelection(); // Remove selection of the new element
-    
-    // Reset to interaction mode after adding text
-    setTool(ElementType.none);
-
-    print("Added text element ${newText.id} at $centeredPosition");
+    // Add with a small delay to ensure UI is ready
+    Future.microtask(() {
+      elements.add(newText);
+      clearSelection(); // Remove selection of the new element
+      
+      // Reset to interaction mode after adding text
+      setTool(ElementType.none);
+      
+      notifyListeners();
+      print("Added text element ${newText.id} at $centeredPosition");
+    });
   }
 
   // --- Drawing Lifecycle (Pen Tool) ---
   void startDrawing(Offset position) {
     if (currentTool != ElementType.pen) return;
+    
+    // Clear any previous drawing to avoid conflicts
+    if (currentElement != null) {
+      currentElement = null;
+    }
+    
     saveToUndoStack();
     currentElement = PenElement(
       id: _uuid.v4(),
@@ -480,15 +490,19 @@ class DrawingProvider extends ChangeNotifier {
         currentElement = null;
         return;
     }
+    
     final pen = currentElement as PenElement;
-
     bool isValid = pen.points.length >= 2;
 
     if (isValid) {
       elements.add(pen);
+      currentElement = null; // Clear the current element
       
       // Reset to interaction mode after drawing
       setTool(ElementType.none);
+      clearSelection(); // Ensure nothing is selected after drawing
+      
+      print("Drawing completed and added to elements");
     } else {
         if (undoStack.isNotEmpty) {
           undoStack.removeLast();
@@ -496,13 +510,15 @@ class DrawingProvider extends ChangeNotifier {
         } else {
           print("Drawing discarded (too short), undo stack was empty.");
         }
+        currentElement = null; // Make sure to clear the element even if invalid
     }
-    currentElement = null;
+    
     notifyListeners();
   }
 
   void discardDrawing() {
     if (currentElement == null) return;
+    
     if (currentElement is PenElement) {
         if (undoStack.isNotEmpty) {
           undoStack.removeLast();
@@ -511,8 +527,12 @@ class DrawingProvider extends ChangeNotifier {
           print("Drawing discarded, undo stack was empty.");
         }
     }
+    
     print("Drawing discarded");
     currentElement = null;
+    
+    // Always reset to selection mode when discarding
+    setTool(ElementType.none);
     notifyListeners();
   }
 
