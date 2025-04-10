@@ -832,6 +832,61 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Add this method to handle starting transformation operations
+  void startPotentialTransformation() {
+    // Store the original elements state for undo/redo
+    saveToUndoStack();
+    _didRotationOccur = false;
+    _didResizeOccur = false;
+  }
+
+  // Add this method to handle ending transformation operations
+  void endPotentialTransformation() {
+    // Finalize the transform operation
+    if (_didRotationOccur || _didResizeOccur) {
+      saveToUndoStack();
+    }
+    notifyListeners();
+  }
+
+  // Implement the scaleSelectedImmediate method to handle scaling
+  void scaleSelectedImmediate(String elementId, double scaleFactor, Size initialSize) {
+    final element = elements.firstWhereOrNull((el) => el.id == elementId);
+    if (element == null) return;
+    
+    // Calculate new size while maintaining aspect ratio
+    final newWidth = initialSize.width * scaleFactor;
+    final newHeight = initialSize.height * scaleFactor;
+    
+    // Get the center position (to scale from center)
+    final centerX = element.bounds.center.dx;
+    final centerY = element.bounds.center.dy;
+    
+    // Calculate new bounds that keep the element centered at the same position
+    final newPosition = Offset(
+      centerX - newWidth / 2,
+      centerY - newHeight / 2
+    );
+    
+    // Create an updated element with new position and size
+    final updatedElement = element.copyWith(
+      position: newPosition,
+      size: Size(newWidth, newHeight)
+    );
+    
+    // Update the element in the list
+    final index = elements.indexOf(element);
+    List<DrawingElement> updatedElements = List.from(elements);
+    updatedElements[index] = updatedElement;
+    elements = updatedElements;
+    
+    // Mark that a resize occurred
+    _didResizeOccur = true;
+    
+    // Notify listeners for UI update
+    notifyListeners();
+  }
+
   // --- Video Playback ---
   void toggleVideoPlayback(String elementId) {
     final element = elements.firstWhere((e) => e.id == elementId);

@@ -64,6 +64,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   // Add a variable to track initial vector for stable rotation
   Offset? _initialRotationVector;
 
+  // Add variable to track initial element size for scaling
+  Size? _initialElementSize;
+
   // Track last tap time for double-tap detection
   DateTime? _lastTapTime;
   
@@ -205,6 +208,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       _draggedHandle = null;
                       _elementBeingInteractedWith = selectedElement;
                       
+                      // Store initial element size for scaling
+                      _initialElementSize = Size(
+                        selectedElement.bounds.width, 
+                        selectedElement.bounds.height
+                      );
+                      
                       // Get positions of both pointers
                       final pointerPositions = _activePointerPositions.values.toList();
                       if (pointerPositions.length == 2) {
@@ -225,7 +234,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       }
                     });
                     
-                    drawingProvider.startPotentialRotation();
+                    drawingProvider.startPotentialTransformation();
                     HapticFeedback.mediumImpact();
                     return;
                   }
@@ -361,7 +370,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 
                 // Handle two-finger rotation and scaling specifically
                 if (_activePointers == 2 && _isRotatingElement && _elementBeingInteractedWith != null) {
-                  if (_activePointerPositions.length == 2 && _initialRotationVector != null) {
+                  if (_activePointerPositions.length == 2 && _initialRotationVector != null && _initialElementSize != null) {
                     // Get positions of both pointers
                     final pointerPositions = _activePointerPositions.values.toList();
                     
@@ -388,8 +397,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       final currentDistance = currentVector.distance;
                       final scaleFactor = currentDistance / _startPointerDistance!;
                       
-                      // You could implement scaling here if needed
-                      // drawingProvider.scaleSelectedImmediate(_elementBeingInteractedWith!.id, scaleFactor);
+                      // Apply scaling
+                      drawingProvider.scaleSelectedImmediate(
+                        _elementBeingInteractedWith!.id, 
+                        scaleFactor,
+                        _initialElementSize!
+                      );
                     }
                   }
                   return;
@@ -484,9 +497,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     _startRotationAngle = null;
                     _rotationReferencePoint = null;
                     _elementBeingInteractedWith = null;
+                    _initialElementSize = null;
                   });
                   
-                  drawingProvider.endPotentialRotation();
+                  drawingProvider.endPotentialTransformation();
                 }
                 
                 // If pointer count drops to zero, end all operations
@@ -500,6 +514,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     _initialRotationVector = null;
                     _startRotationAngle = null;
                     _rotationReferencePoint = null;
+                    _initialElementSize = null;
                   });
                   
                   _lastInteractionPosition = null; 
@@ -580,6 +595,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   _startRotationAngle = null;
                   _rotationReferencePoint = null;
                   _initialRotationVector = null;
+                  _initialElementSize = null;
                 });
                 _lastInteractionPosition = null;
                 _potentialInteractionStartPosition = null;
