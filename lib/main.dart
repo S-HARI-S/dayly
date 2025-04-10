@@ -229,7 +229,8 @@ class _DrawingBoardState extends State<DrawingBoard> {
                       mainAxisSize: MainAxisSize.min, // Fit content
                       children: [
                         // --- Tools ---
-                        // Only show actual content creation tools
+                        // Only show content creation tools
+                        // No selection tool button as per user request
                         ToolButton(
                           icon: Icons.edit,
                           isSelected: drawingProvider.currentTool == ElementType.pen,
@@ -374,15 +375,13 @@ class _DrawingBoardState extends State<DrawingBoard> {
           ),
         ],
       ),
-      // Add the toolbar to the main drawing screen
-      // Show toolbar only if an element is selected
       bottomNavigationBar: Consumer<DrawingProvider>(
         builder: (context, provider, _) {
+          // No need to check provider.showContextToolbar here, the component handles it
           return ContextToolbar(
-            height: 80.0, 
             isVisible: provider.showContextToolbar,
             onHeightChanged: (height) {
-              // Optional: can add UI adjustments when toolbar height changes
+              // We can leave this empty as the toolbar handles its own height
             },
           );
         },

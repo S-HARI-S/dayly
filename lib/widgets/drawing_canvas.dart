@@ -58,6 +58,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   // Initial angle for rotation tracking
   double? _startRotationAngle;
 
+  // Add variable to track initial distance between pointers for scaling
+  double? _startPointerDistance;
+
+  // Add a variable to track initial vector for stable rotation
+  Offset? _initialRotationVector;
+
   // Track last tap time for double-tap detection
   DateTime? _lastTapTime;
   
@@ -104,17 +110,30 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return math.atan2(point.dy - center.dy, point.dx - center.dx);
   }
 
-  // Add a helper method to calculate angle between two points relative to a center point
-  double _calculateAngleBetweenPoints(Offset center, Offset point1, Offset point2) {
-    // Get vectors from center to each point
-    final vec1 = point1 - center;
-    final vec2 = point2 - center;
+  // Update this helper method to calculate the angle between two vectors
+  double _calculateAngleBetweenVectors(Offset vec1, Offset vec2) {
+    // Calculate the angle between these vectors using the dot product
+    double dotProduct = vec1.dx * vec2.dx + vec1.dy * vec2.dy;
+    double vec1Magnitude = math.sqrt(vec1.dx * vec1.dx + vec1.dy * vec1.dy);
+    double vec2Magnitude = math.sqrt(vec2.dx * vec2.dx + vec2.dy * vec2.dy);
     
-    // Calculate the angle between these vectors
-    final angle = math.atan2(vec1.dy, vec1.dx) - math.atan2(vec2.dy, vec2.dx);
+    // Handle division by zero
+    if (vec1Magnitude == 0 || vec2Magnitude == 0) return 0;
     
-    // Normalize angle to be between 0 and 2π
-    return (angle + 2 * math.pi) % (2 * math.pi);
+    double cosAngle = dotProduct / (vec1Magnitude * vec2Magnitude);
+    // Ensure cosAngle is within valid range for acos
+    cosAngle = math.max(-1.0, math.min(1.0, cosAngle));
+    
+    // Get the angle
+    double angle = math.acos(cosAngle);
+    
+    // Determine rotation direction using cross product (z-component)
+    double crossZ = vec1.dx * vec2.dy - vec1.dy * vec2.dx;
+    if (crossZ < 0) {
+      angle = -angle;
+    }
+    
+    return angle;
   }
 
   @override
@@ -164,13 +183,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 
                 setState(() { 
                   _activePointers++; 
-                  _isMovingElement = false; 
-                  _isResizingElement = false; 
-                  _isRotatingElement = false;
-                  _isSelectionInProgress = false;
-                  _draggedHandle = null; 
-                  _elementBeingInteractedWith = null; 
-                  _startRotationAngle = null;
                 });
                 
                 _potentialInteractionStartPosition = localPosition; 
@@ -184,30 +196,38 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   );
                   
                   if (selectedElement != null) {
-                    // Initialize rotation mode
+                    // Initialize rotation and scaling mode
                     setState(() {
+                      _isMovingElement = false;
+                      _isResizingElement = false; 
                       _isRotatingElement = true;
+                      _isSelectionInProgress = false;
+                      _draggedHandle = null;
                       _elementBeingInteractedWith = selectedElement;
-                      
-                      // Calculate center of the element as the rotation pivot point
-                      _rotationReferencePoint = selectedElement.bounds.center;
                       
                       // Get positions of both pointers
                       final pointerPositions = _activePointerPositions.values.toList();
                       if (pointerPositions.length == 2) {
-                        // Calculate initial angle between pointers for reference
-                        final initialAngle = _calculateAngleBetweenPoints(
-                          _rotationReferencePoint!, 
-                          pointerPositions[0], 
-                          pointerPositions[1]
+                        // Store the initial vector between the two points - this is our reference
+                        _initialRotationVector = pointerPositions[1] - pointerPositions[0];
+                        
+                        // Store current rotation as the starting point
+                        _startRotationAngle = selectedElement.rotation;
+                        
+                        // Calculate initial distance between pointers for scaling
+                        _startPointerDistance = _initialRotationVector!.distance;
+                        
+                        // Center of rotation will be the midpoint between the two fingers
+                        _rotationReferencePoint = Offset(
+                          (pointerPositions[0].dx + pointerPositions[1].dx) / 2,
+                          (pointerPositions[0].dy + pointerPositions[1].dy) / 2
                         );
-                        _startRotationAngle = initialAngle - selectedElement.rotation;
                       }
                     });
                     
                     drawingProvider.startPotentialRotation();
                     HapticFeedback.mediumImpact();
-                    return; // Skip other handlers when starting two-finger rotation
+                    return;
                   }
                 }
                 
@@ -339,22 +359,40 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 // Update the position of this pointer
                 _activePointerPositions[event.pointer] = event.localPosition;
                 
-                // Handle two-finger rotation specifically
+                // Handle two-finger rotation and scaling specifically
                 if (_activePointers == 2 && _isRotatingElement && _elementBeingInteractedWith != null) {
-                  final pointerPositions = _activePointerPositions.values.toList();
-                  if (pointerPositions.length == 2 && _rotationReferencePoint != null && _startRotationAngle != null) {
-                    // Calculate current angle between the two pointers relative to element center
-                    final currentAngle = _calculateAngleBetweenPoints(
-                      _rotationReferencePoint!, 
-                      pointerPositions[0], 
-                      pointerPositions[1]
+                  if (_activePointerPositions.length == 2 && _initialRotationVector != null) {
+                    // Get positions of both pointers
+                    final pointerPositions = _activePointerPositions.values.toList();
+                    
+                    // Calculate current vector between the two points
+                    final currentVector = pointerPositions[1] - pointerPositions[0];
+                    
+                    // Calculate the rotation angle as the angle between the initial and current vectors
+                    final angleChange = _calculateAngleBetweenVectors(_initialRotationVector!, currentVector);
+                    
+                    // Apply rotation starting from the element's initial rotation
+                    final newRotation = _startRotationAngle! + angleChange;
+                    
+                    // Update the midpoint for rotation
+                    _rotationReferencePoint = Offset(
+                      (pointerPositions[0].dx + pointerPositions[1].dx) / 2,
+                      (pointerPositions[0].dy + pointerPositions[1].dy) / 2
                     );
                     
-                    // Calculate and apply the rotation
-                    final newRotation = currentAngle - _startRotationAngle!;
+                    // Apply the rotation
                     drawingProvider.rotateSelectedImmediate(_elementBeingInteractedWith!.id, newRotation);
+                    
+                    // Calculate scaling factor based on distance change between pointers
+                    if (_startPointerDistance != null && _startPointerDistance! > 0) {
+                      final currentDistance = currentVector.distance;
+                      final scaleFactor = currentDistance / _startPointerDistance!;
+                      
+                      // You could implement scaling here if needed
+                      // drawingProvider.scaleSelectedImmediate(_elementBeingInteractedWith!.id, scaleFactor);
+                    }
                   }
-                  return; // Skip other handlers when doing two-finger rotation
+                  return;
                 }
                 
                 if (_activePointers != 1 || widget.isInteracting) return;
@@ -432,23 +470,41 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 bool wasSelecting = _isSelectionInProgress;
                 DrawingElement? interactedElement = _elementBeingInteractedWith;
 
+                // Decrease active pointer count
                 setState(() { 
                   _activePointers = _activePointers > 0 ? _activePointers - 1 : 0; 
-                  _isMovingElement = false; 
-                  _isResizingElement = false; 
-                  _isRotatingElement = false;
-                  _isSelectionInProgress = false;
-                  _draggedHandle = null; 
-                  _elementBeingInteractedWith = null;
-                  _startRotationAngle = null;
-                  _rotationReferencePoint = null;
                 });
                 
-                _lastInteractionPosition = null; 
-                _potentialInteractionStartPosition = null;
-
-                // If pointer count drops to zero, end the current operation
+                // If we drop to 0 or 1 pointer while rotating, end the rotation
+                if (wasRotating && _activePointers < 2) {
+                  // End rotation mode completely
+                  setState(() {
+                    _isRotatingElement = false;
+                    _initialRotationVector = null;
+                    _startRotationAngle = null;
+                    _rotationReferencePoint = null;
+                    _elementBeingInteractedWith = null;
+                  });
+                  
+                  drawingProvider.endPotentialRotation();
+                }
+                
+                // If pointer count drops to zero, end all operations
                 if (_activePointers == 0 && !widget.isInteracting) {
+                  setState(() {
+                    _isMovingElement = false; 
+                    _isResizingElement = false;
+                    _isSelectionInProgress = false;
+                    _draggedHandle = null;
+                    _elementBeingInteractedWith = null;
+                    _initialRotationVector = null;
+                    _startRotationAngle = null;
+                    _rotationReferencePoint = null;
+                  });
+                  
+                  _lastInteractionPosition = null; 
+                  _potentialInteractionStartPosition = null;
+
                   // Specifically check if a pen stroke is active and needs to be finalized
                   if (currentTool == ElementType.pen && drawingProvider.currentElement != null) { 
                     drawingProvider.endDrawing();
@@ -523,6 +579,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   _elementBeingInteractedWith = null; 
                   _startRotationAngle = null;
                   _rotationReferencePoint = null;
+                  _initialRotationVector = null;
                 });
                 _lastInteractionPosition = null;
                 _potentialInteractionStartPosition = null;
@@ -908,13 +965,21 @@ class ElementPainter extends CustomPainter {
     
     canvas.save();
     
-    if (element.rotation != 0) {
+    // Check if the element type internally handles rotation
+    bool elementHandlesOwnRotation = element is ImageElement || 
+                                    element is VideoElement || 
+                                    element is GifElement;
+    
+    if (element.rotation != 0 && !elementHandlesOwnRotation) {
+      // Only apply rotation here if the element doesn't handle its own rotation
       final center = element.bounds.center;
       canvas.translate(center.dx, center.dy);
       canvas.rotate(element.rotation);
       canvas.translate(-center.dx, -center.dy);
     }
     
+    // For elements that handle their own rotation, pass a flag to indicate
+    // that rotation is already applied at the container level
     element.render(canvas, inverseScale: inverseScale);
     canvas.restore();
   }
