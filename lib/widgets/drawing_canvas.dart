@@ -193,6 +193,372 @@ class GridPainter extends CustomPainter {
   }
 }
 
+// Add ShadowPainter class before ElementPainter
+class ShadowPainter extends CustomPainter {
+  final DrawingElement element;
+  final Matrix4 currentTransform;
+  // Define the light source position (fixed at the top)
+  final Offset lightSource = const Offset(0, -5000); // Light is positioned far above the canvas
+
+  ShadowPainter({required this.element, required this.currentTransform});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Rect bounds = element.bounds;
+    if (bounds.isEmpty) return;
+    
+    final double scale = currentTransform.getMaxScaleOnAxis();
+    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+    
+    // Calculate shadow parameters based on physics
+    final Offset elementCenter = bounds.center;
+    
+    // Direction from light source to element
+    final Offset lightDirection = elementCenter - lightSource;
+    
+    // Normalize the direction vector
+    final double lightDistance = lightDirection.distance;
+    final Offset normalizedDirection = lightDirection / lightDistance;
+    
+    // Calculate element "height" based on element type
+    // Different elements have different heights above the canvas
+    double elementHeight;
+    
+    // Assign different heights based on element type
+    if (element is TextElement) {
+      elementHeight = 60 * inverseScale; // Increased height for more visible shadow
+    } else if (element is NoteElement) {
+      elementHeight = 100 * inverseScale; // Notes are like sticky notes
+    } else if (element is ImageElement || element is VideoElement || element is GifElement) {
+      elementHeight = 150 * inverseScale; // Media elements float higher
+    } else if (element is PenElement) {
+      elementHeight = 40 * inverseScale; // Pen strokes are close to canvas
+    } else {
+      elementHeight = 80 * inverseScale; // Default height
+    }
+    
+    // Calculate shadow length based on element height and light angle
+    // The shadow length is proportional to the height and the tangent of the light angle
+    final double distanceRatio = lightDistance / 5000;
+    final double shadowLength = elementHeight * distanceRatio * 8.0; // Increased multiplier for longer shadows
+    
+    // Shadow offset is based on normalized direction and shadow length
+    final double offsetX = normalizedDirection.dx * shadowLength;
+    final double offsetY = normalizedDirection.dy * shadowLength;
+    
+    // Shadow blur increases with distance from light and height
+    // Higher objects cast more diffuse shadows
+    final double shadowBlur = 5 * inverseScale * (1 + (elementHeight / 50)) * (1 + (distanceRatio * 0.5)); // Increased base blur
+    
+    // Shadow opacity decreases with distance (simulating light falloff)
+    // and is affected by element type (some are more "transparent")
+    double shadowOpacity = 0.6 * (3000 / (lightDistance + 1000)); // Increased base opacity
+    
+    // Adjust opacity based on element type
+    if (element is PenElement) {
+      shadowOpacity *= 0.8; // Pen strokes have lighter shadows
+    } else if (element is TextElement) {
+      shadowOpacity *= 1.0; // Text has clearer shadows
+    } else if (element is NoteElement) {
+      shadowOpacity *= 1.2; // Notes have stronger shadows
+    }
+    
+    // Cap the opacity to a reasonable range
+    shadowOpacity = shadowOpacity.clamp(0.2, 0.7); // Higher min and max opacity
+    
+    final Paint shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(shadowOpacity)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur);
+    
+    canvas.save();
+    
+    if (element.rotation != 0) {
+      final center = element.bounds.center;
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(element.rotation);
+      canvas.translate(-center.dx, -center.dy);
+    }
+    
+    // Draw shadow based on element type
+    if (element is PenElement) {
+      final pen = element as PenElement;
+      if (pen.points.length >= 2) {
+        // For pen strokes, create a shadow that follows the stroke
+        final strokeWidth = pen.strokeWidth;
+        
+        final Paint penShadowPaint = Paint()
+          ..color = Colors.black.withOpacity(shadowOpacity * 1.2) // Increased opacity for pen shadows
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.2) // More blur for softer shadow
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth * 1.5 * inverseScale // Wider shadow for more visibility
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+          
+        final shadowPath = Path();
+        
+        // Start point with physics-based offset
+        final firstPoint = Offset(pen.points.first.dx + offsetX, pen.points.first.dy + offsetY);
+        shadowPath.moveTo(firstPoint.dx, firstPoint.dy);
+        
+        // Connect points with curved paths for smoother shadow
+        if (pen.points.length == 2) {
+          // Simple line for just two points
+          shadowPath.lineTo(pen.points[1].dx + offsetX, pen.points[1].dy + offsetY);
+        } else if (pen.points.length == 3) {
+          // Use quadratic bezier for 3 points
+          final controlPoint = Offset(
+            pen.points[1].dx + offsetX,
+            pen.points[1].dy + offsetY
+          );
+          final endPoint = Offset(
+            pen.points[2].dx + offsetX,
+            pen.points[2].dy + offsetY
+          );
+          shadowPath.quadraticBezierTo(
+            controlPoint.dx, controlPoint.dy,
+            endPoint.dx, endPoint.dy
+          );
+        } else {
+          // For many points, use a smooth curve algorithm
+          // This creates a more natural shadow for pen strokes
+          for (int i = 0; i < pen.points.length - 1; i++) {
+            final p0 = (i > 0) ? pen.points[i - 1] : pen.points[0];
+            final p1 = pen.points[i];
+            final p2 = pen.points[i + 1];
+            final p3 = (i < pen.points.length - 2) ? pen.points[i + 2] : p2;
+            
+            // Calculate control points for a smooth Catmull-Rom spline 
+            // (approximated with cubic bezier)
+            final double tension = 0.5; // Controls how tight the curve is
+            
+            final cp1 = Offset(
+              p1.dx + (p2.dx - p0.dx) * tension / 6,
+              p1.dy + (p2.dy - p0.dy) * tension / 6
+            );
+            
+            final cp2 = Offset(
+              p2.dx - (p3.dx - p1.dx) * tension / 6,
+              p2.dy - (p3.dy - p1.dy) * tension / 6
+            );
+            
+            // Add physics-based shadow offset
+            final shadowP1 = Offset(p1.dx + offsetX, p1.dy + offsetY);
+            final shadowP2 = Offset(p2.dx + offsetX, p2.dy + offsetY);
+            final shadowCp1 = Offset(cp1.dx + offsetX, cp1.dy + offsetY);
+            final shadowCp2 = Offset(cp2.dx + offsetX, cp2.dy + offsetY);
+            
+            if (i == 0) {
+              shadowPath.moveTo(shadowP1.dx, shadowP1.dy);
+            }
+            
+            // Use cubic bezier for smoother curves
+            shadowPath.cubicTo(
+              shadowCp1.dx, shadowCp1.dy,
+              shadowCp2.dx, shadowCp2.dy,
+              shadowP2.dx, shadowP2.dy
+            );
+          }
+        }
+        
+        // Draw the main shadow
+        canvas.drawPath(shadowPath, penShadowPaint);
+        
+        // Draw a second, more concentrated shadow for added depth
+        final Paint secondaryShadowPaint = Paint()
+          ..color = Colors.black.withOpacity(shadowOpacity * 1.5)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 0.7)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth * 0.8 * inverseScale
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+          
+        // Calculate a shorter offset for the secondary shadow (closer to the stroke)
+        final double secondaryOffsetRatio = 0.6;
+        final double secondaryOffsetX = offsetX * secondaryOffsetRatio;
+        final double secondaryOffsetY = offsetY * secondaryOffsetRatio;
+        
+        // Create a secondary shadow path
+        final secondaryShadowPath = Path();
+        
+        // Apply the same path generation logic with a shorter offset
+        if (pen.points.length == 2) {
+          secondaryShadowPath.moveTo(pen.points.first.dx + secondaryOffsetX, pen.points.first.dy + secondaryOffsetY);
+          secondaryShadowPath.lineTo(pen.points[1].dx + secondaryOffsetX, pen.points[1].dy + secondaryOffsetY);
+        } else if (pen.points.length == 3) {
+          secondaryShadowPath.moveTo(pen.points.first.dx + secondaryOffsetX, pen.points.first.dy + secondaryOffsetY);
+          secondaryShadowPath.quadraticBezierTo(
+            pen.points[1].dx + secondaryOffsetX, pen.points[1].dy + secondaryOffsetY,
+            pen.points[2].dx + secondaryOffsetX, pen.points[2].dy + secondaryOffsetY
+          );
+        } else {
+          // Apply the same smooth curve algorithm for the secondary shadow
+          for (int i = 0; i < pen.points.length - 1; i++) {
+            final p0 = (i > 0) ? pen.points[i - 1] : pen.points[0];
+            final p1 = pen.points[i];
+            final p2 = pen.points[i + 1];
+            final p3 = (i < pen.points.length - 2) ? pen.points[i + 2] : p2;
+            
+            final cp1 = Offset(
+              p1.dx + (p2.dx - p0.dx) * 0.5 / 6,
+              p1.dy + (p2.dy - p0.dy) * 0.5 / 6
+            );
+            
+            final cp2 = Offset(
+              p2.dx - (p3.dx - p1.dx) * 0.5 / 6,
+              p2.dy - (p3.dy - p1.dy) * 0.5 / 6
+            );
+            
+            final sShadowP1 = Offset(p1.dx + secondaryOffsetX, p1.dy + secondaryOffsetY);
+            final sShadowP2 = Offset(p2.dx + secondaryOffsetX, p2.dy + secondaryOffsetY);
+            final sShadowCp1 = Offset(cp1.dx + secondaryOffsetX, cp1.dy + secondaryOffsetY);
+            final sShadowCp2 = Offset(cp2.dx + secondaryOffsetX, cp2.dy + secondaryOffsetY);
+            
+            if (i == 0) {
+              secondaryShadowPath.moveTo(sShadowP1.dx, sShadowP1.dy);
+            }
+            
+            secondaryShadowPath.cubicTo(
+              sShadowCp1.dx, sShadowCp1.dy,
+              sShadowCp2.dx, sShadowCp2.dy,
+              sShadowP2.dx, sShadowP2.dy
+            );
+          }
+        }
+        
+        // Draw the secondary shadow
+        canvas.drawPath(secondaryShadowPath, secondaryShadowPaint);
+      }
+    } else {
+      // For rectangular elements like TextElement, NoteElement, ImageElement, etc.
+      final rect = bounds;
+      final radius = element is TextElement || element is NoteElement 
+          ? Radius.circular(8 * inverseScale)
+          : Radius.circular(4 * inverseScale);
+      
+      // Create a layered shadow effect for greater depth
+      
+      // Outer shadow (more diffuse)
+      final outerShadowPaint = Paint()
+        ..color = Colors.black.withOpacity(shadowOpacity * 0.7)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.5);
+        
+      // Middle shadow
+      final middleShadowPaint = Paint()
+        ..color = Colors.black.withOpacity(shadowOpacity * 0.85)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.1);
+        
+      // Inner shadow (sharper)
+      final innerShadowPaint = Paint()
+        ..color = Colors.black.withOpacity(shadowOpacity * 1.0)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 0.7);
+      
+      // Calculate offset for each shadow layer
+      final outerOffset = Offset(offsetX, offsetY);
+      final middleOffset = Offset(offsetX * 0.8, offsetY * 0.8);
+      final innerOffset = Offset(offsetX * 0.6, offsetY * 0.6);
+      
+      // Draw shadow with physics-based offset - outer layer
+      final outerShadowRect = rect.translate(outerOffset.dx, outerOffset.dy);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(outerShadowRect, radius),
+        outerShadowPaint
+      );
+      
+      // Middle layer
+      final middleShadowRect = rect.translate(middleOffset.dx, middleOffset.dy);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(middleShadowRect, radius),
+        middleShadowPaint
+      );
+      
+      // Inner layer
+      final innerShadowRect = rect.translate(innerOffset.dx, innerOffset.dy);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(innerShadowRect, radius),
+        innerShadowPaint
+      );
+    }
+    
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant ShadowPainter oldDelegate) {
+    return element != oldDelegate.element || 
+           currentTransform != oldDelegate.currentTransform;
+  }
+}
+
+// Add SelectionBorderPainter to handle selection borders
+class SelectionBorderPainter extends CustomPainter {
+  final DrawingElement element;
+  final Matrix4 currentTransform;
+
+  SelectionBorderPainter({required this.element, required this.currentTransform});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double scale = currentTransform.getMaxScaleOnAxis();
+    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+    final Rect bounds = element.bounds;
+    if (bounds.isEmpty) return;
+    
+    canvas.save();
+    
+    if (element.rotation != 0) {
+      final center = element.bounds.center;
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(element.rotation);
+      canvas.translate(-center.dx, -center.dy);
+    }
+    
+    // Draw selection outline with a clear blue color
+    final selectionPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2 * inverseScale;
+    
+    if (element is PenElement) {
+      final pen = element as PenElement;
+      if (pen.points.length >= 2) {
+        // Draw selection outline for pen strokes
+        final Path path = Path();
+        path.moveTo(pen.points.first.dx, pen.points.first.dy);
+        
+        for (int i = 1; i < pen.points.length; i++) {
+          path.lineTo(pen.points[i].dx, pen.points[i].dy);
+        }
+        
+        canvas.drawPath(
+          path,
+          selectionPaint..strokeWidth = (pen.strokeWidth + 4) * inverseScale
+        );
+      }
+    } else if (element is TextElement || element is NoteElement) {
+      // Draw rounded rectangle for text and notes
+      final radius = Radius.circular(8 * inverseScale);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(bounds, radius),
+        selectionPaint
+      );
+    } else {
+      // For other elements
+      final radius = Radius.circular(4 * inverseScale);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(bounds, radius),
+        selectionPaint
+      );
+    }
+    
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant SelectionBorderPainter oldDelegate) {
+    return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
+  }
+}
+
 class DrawingCanvas extends StatefulWidget {
   final TransformationController transformationController;
   final bool isInteracting;
@@ -210,7 +576,7 @@ class DrawingCanvas extends StatefulWidget {
   }
 }
 
-class _DrawingCanvasState extends State<DrawingCanvas> {
+class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProviderStateMixin {
   // --- State & Config ---
   int _activePointers = 0; 
   Timer? _moveDelayTimer; 
@@ -224,10 +590,24 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool _isSelectionInProgress = false; // Track if we're in selection mode
   ResizeHandleType? _draggedHandle;
   DrawingElement? _elementBeingInteractedWith;
-  static const Duration longPressDuration = Duration(milliseconds: 350); // Regular selection duration
-  static const Duration radialMenuDuration = Duration(milliseconds: 1000); // Longer duration for radial menu
+  static const Duration longPressDuration = Duration(milliseconds: 500); // Regular selection duration
+  static const Duration radialMenuDuration = Duration(milliseconds: 1800); // Longer duration for radial menu
   static const double moveCancelThreshold = 10.0; // Threshold to determine if user is moving
   static const double animationScale = 1.05; // Scale factor for selection pop effect
+  
+  // Physical interaction properties
+  static const double elevationAmount = 20.0; // Increased lift amount for more dramatic effect
+  bool _isElementElevated = false; // Track if element is currently lifted
+  bool _isElementDropping = false; // Track if element is in dropping animation
+  
+  // Pressure build-up animation properties
+  late AnimationController _pressureController;
+  Timer? _pressureTimer; // Dedicated timer for pressure animation
+  double _pressureThreshold = 0.8; // Increased threshold to make the pop more dramatic
+  bool _isPressingElement = false; // Track if element is currently being pressed
+  bool _hasPoppedOut = false; // Track if the element has popped out
+  int _pressureUpdateCounter = 0; // Counter for pressure updates
+  static const int pressureThresholdTime = 450; // Time in ms until pop occurs
 
   // State for RadialMenu display
   OverlayEntry? _radialMenuOverlay;
@@ -393,7 +773,130 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    
+    // Initialize pressure animation controller with longer duration
+    _pressureController = AnimationController(
+      vsync: this, 
+      duration: const Duration(milliseconds: pressureThresholdTime),
+      value: 0.0,
+    );
+    
+    // Add listener to handle the "pop" when reaching threshold
+    _pressureController.addListener(_handlePressureChange);
+  }
+  
+  void _handlePressureChange() {
+    // Pop out when we reach the threshold
+    if (_pressureController.value >= _pressureThreshold && !_hasPoppedOut && _isPressingElement) {
+      setState(() {
+        _hasPoppedOut = true;
+        _isElementElevated = true;
+      });
+      
+      // Create a dramatic pop effect with a spring animation
+      _popEffectAnimation();
+      
+      // Provide haptic feedback when element pops
+      HapticFeedback.mediumImpact();
+      print("POPPED OUT at pressure: ${_pressureController.value}, time: ${_pressureUpdateCounter}ms");
+    }
+  }
+  
+  // Create a dramatic popping animation with overshoot
+  void _popEffectAnimation() {
+    if (!mounted || _elementBeingInteractedWith == null) return;
+    
+    // Animate the controller to slightly overshoot and bounce back
+    _pressureController.animateTo(
+      1.0, // Full value
+      duration: Duration(milliseconds: 300),
+      curve: Curves.elasticOut, // Spring effect
+    );
+  }
+  
+  void _startPressureBuild(DrawingElement element) {
+    // Reset pressure state
+    _pressureController.value = 0.0;
+    _pressureUpdateCounter = 0;
+    _hasPoppedOut = false;
+    _isPressingElement = true;
+    
+    print("Starting pressure build-up animation");
+    
+    // Cancel any existing timer
+    _pressureTimer?.cancel();
+    
+    // Start incrementing pressure gradually - 16ms is approximately 60fps
+    _pressureTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
+      if (!mounted || !_isPressingElement) {
+        timer.cancel();
+        return;
+      }
+      
+      _pressureUpdateCounter += 16; // Increment by approx time between frames
+      
+      if (_hasPoppedOut) {
+        // If already popped, stop incrementing pressure
+        timer.cancel();
+        return;
+      }
+      
+      // Calculate pressure based on elapsed time with non-linear curve
+      // This will create a slow start, faster middle, then dramatically pop at the end
+      double pressureValue = 0.0;
+      try {
+        // Map time to pressure range with an acceleration curve
+        // This creates a more dramatic build-up effect
+        final double normalizedTime = _pressureUpdateCounter / pressureThresholdTime;
+        
+        if (normalizedTime < 0.5) {
+          // First half: slow start (quadratic curve)
+          pressureValue = 0.3 * math.pow(normalizedTime * 2, 2);
+        } else if (normalizedTime < 0.85) {
+          // Middle part: linear increase
+          pressureValue = 0.3 + 0.3 * ((normalizedTime - 0.5) / 0.35);
+        } else {
+          // Final rush toward threshold (cubic acceleration)
+          final double t = (normalizedTime - 0.85) / 0.15;
+          pressureValue = 0.6 + 0.4 * math.pow(t, 1.5);
+        }
+        
+        // Ensure value is within bounds
+        pressureValue = pressureValue.clamp(0.0, 1.0);
+      } catch (e) {
+        print("Error calculating pressure: $e");
+        // Fallback to linear calculation
+        pressureValue = (_pressureUpdateCounter / pressureThresholdTime).clamp(0.0, 1.0);
+      }
+      
+      if (mounted) {
+        setState(() {
+          _pressureController.value = pressureValue;
+          
+          // Debug log
+          if (_pressureUpdateCounter % 100 == 0) {
+            print("Pressure: ${_pressureController.value}, Time: ${_pressureUpdateCounter}ms");
+          }
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+  
+  void _stopPressureBuild() {
+    _isPressingElement = false;
+    _pressureTimer?.cancel();
+    _pressureTimer = null;
+    _pressureController.value = 0.0;
+  }
+
+  @override
   void dispose() { 
+    _pressureController.dispose();
+    _pressureTimer?.cancel();
     _cancelMoveTimer();
     _cancelLongPressTimer();
     _cancelRadialMenuTimer();
@@ -542,14 +1045,24 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     );
                     
                     if (hitElement != null) {
+                      print("Element hit: ${hitElement.runtimeType} - starting interactions");
+                      
                       // Set the element being interacted with
                       setState(() {
                         _elementBeingInteractedWith = hitElement;
+                        _hasPoppedOut = false;
+                        _isPressingElement = true;
                       });
+                      
+                      // Start building pressure for the pop effect
+                      _startPressureBuild(hitElement);
+                      print("Started pressure build, current pressure: ${_pressureController.value}");
                       
                       // Regular selection timer (shorter)
                       _longPressTimer = Timer(longPressDuration, () {
                         if (!mounted) return;
+                        
+                        print("Long press timer fired");
                         
                         setState(() { 
                           _isSelectionInProgress = true;
@@ -560,7 +1073,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                           drawingProvider.clearSelection(notify: false);
                         }
                         
-                        HapticFeedback.mediumImpact();
+                        // If element hasn't popped yet via pressure, force it now
+                        if (!_hasPoppedOut) {
+                          print("Element hasn't popped yet, forcing pop");
+                          setState(() {
+                            _hasPoppedOut = true;
+                            _isElementElevated = true;
+                          });
+                          HapticFeedback.mediumImpact();
+                        } else {
+                          print("Element already popped out: $_hasPoppedOut");
+                        }
+                        
                         drawingProvider.selectElement(hitElement);
                         
                         _moveDelayTimer = Timer(Duration(milliseconds: 50), () {
@@ -640,10 +1164,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerMove: (PointerMoveEvent event) {
                 if (!mounted) return;
                 
-                final prevPosition = _activePointerPositions[event.pointer];
+                final Offset currentPosition = event.localPosition;
+                final Offset? previousPosition = _activePointerPositions[event.pointer];
                 
                 // Update the position of this pointer
-                _activePointerPositions[event.pointer] = event.localPosition;
+                _activePointerPositions[event.pointer] = currentPosition;
                 
                 // If this pointer initiated the radial menu, let the menu handle it
                 if (_isRadialMenuShowing && _radialMenuActivePointer == event.pointer) {
@@ -651,18 +1176,31 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   if (_radialMenuOverlay != null) {
                     // Get the global position for the radial menu
                     final RenderBox box = context.findRenderObject() as RenderBox;
-                    final Offset globalPosition = box.localToGlobal(event.localPosition);
+                    final Offset globalPosition = box.localToGlobal(currentPosition);
                     // Update radial menu with the new position
                     RadialMenuController.instance.updatePointerPosition(globalPosition);
                   }
                   return;
                 }
                 
-                // If user moved finger significantly before radial menu appeared, cancel the radial menu timer
-                if (_radialMenuTimer != null && prevPosition != null && !_isRadialMenuShowing) {
-                  final distance = (event.localPosition - prevPosition).distance;
-                  if (distance > moveCancelThreshold) {
-                    print("Canceling radial menu timer due to movement: $distance");
+                // Check if user moved finger significantly
+                if (previousPosition != null) {
+                  final double distance = (currentPosition - previousPosition).distance;
+                  
+                  // If we're currently building pressure and the pointer moved significantly, cancel the pressure build-up
+                  if (_isPressingElement && distance > moveCancelThreshold / 2) {
+                    print("Canceling pressure build due to movement: $distance px");
+                    _stopPressureBuild();
+                  }
+                  
+                  // If waiting for long press or radial menu, check for movement to cancel
+                  if ((_longPressTimer?.isActive ?? false) && distance > moveCancelThreshold) {
+                    print("Canceling long press timer due to movement: $distance px");
+                    _cancelLongPressTimer();
+                  }
+                  
+                  if ((_radialMenuTimer?.isActive ?? false) && !_isRadialMenuShowing && distance > moveCancelThreshold) {
+                    print("Canceling radial menu timer due to movement: $distance px");
                     _cancelRadialMenuTimer();
                   }
                 }
@@ -670,6 +1208,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 // Handle two-finger rotation and scaling specifically
                 if (_activePointers == 2 && _isRotatingElement && _elementBeingInteractedWith != null) {
                   if (_activePointerPositions.length == 2 && _initialRotationVector != null && _initialElementSize != null) {
+                    // Set elevation state
+                    if (!_isElementElevated) {
+                      setState(() {
+                        _isElementElevated = true;
+                      });
+                    }
+                    
                     // Get positions of both pointers
                     final pointerPositions = _activePointerPositions.values.toList();
                     
@@ -709,31 +1254,33 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 
                 if (_activePointers != 1 || widget.isInteracting) return;
                 
-                final Offset localPosition = event.localPosition;
-                
-                final delta = (_lastInteractionPosition != null) 
-                    ? localPosition - _lastInteractionPosition! 
+                final delta = (previousPosition != null) 
+                    ? currentPosition - previousPosition 
                     : Offset.zero;
                 final currentTool = drawingProvider.currentTool;
 
                 // Check if we're currently drawing with the pen tool
                 if (currentTool == ElementType.pen && drawingProvider.currentElement != null) {
                   // If we're already drawing, keep updating the drawing
-                  print("✏️ Drawing with pen at ${localPosition}");
-                  drawingProvider.updateDrawing(localPosition);
+                  print("✏️ Drawing with pen at ${currentPosition}");
+                  drawingProvider.updateDrawing(currentPosition);
                   _cancelLongPressTimer(); // Cancel any pending selection if we're actively drawing
-                } else if (_longPressTimer?.isActive ?? false) {
-                  final movementDistance = (_potentialInteractionStartPosition != null) 
-                      ? (localPosition - _potentialInteractionStartPosition!).distance 
-                      : 0.0;
-                  
-                  if (movementDistance > moveCancelThreshold) {
-                    _cancelLongPressTimer();
-                  }
+                  _stopPressureBuild(); // Also stop pressure build if we're drawing
                 } else if (_isSelectionInProgress || _isMovingElement || _isResizingElement || _isRotatingElement) {
+                  // Set elevation state for dragging operations
+                  if (!_isElementElevated) {
+                    setState(() {
+                      _isElementElevated = true;
+                      // If we start moving while building pressure, cancel the pressure
+                      if (_isPressingElement) {
+                        _stopPressureBuild();
+                      }
+                    });
+                  }
+                  
                   if (_isRotatingElement && _elementBeingInteractedWith != null && _startRotationAngle != null) {
                     final elementCenter = _elementBeingInteractedWith!.bounds.center;
-                    final currentAngle = _calculateAngle(elementCenter, localPosition);
+                    final currentAngle = _calculateAngle(elementCenter, currentPosition);
                     final newRotation = currentAngle - _startRotationAngle!;
                     
                     drawingProvider.rotateSelectedImmediate(_elementBeingInteractedWith!.id, newRotation);
@@ -742,14 +1289,20 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       _elementBeingInteractedWith!.id, 
                       _draggedHandle!, 
                       delta, 
-                      localPosition, 
-                      _potentialInteractionStartPosition ?? localPosition
+                      currentPosition, 
+                      _potentialInteractionStartPosition ?? currentPosition
                     );
                   } else if (_isMovingElement && _elementBeingInteractedWith != null) {
                     if (_moveDelayTimer?.isActive ?? false) {
                       _cancelMoveTimer();
                       setState(() {
                         _isMovingElement = true;
+                        _isElementElevated = true; // Ensure element is elevated during movement
+                        
+                        // If we start moving while building pressure, cancel the pressure
+                        if (_isPressingElement) {
+                          _stopPressureBuild();
+                        }
                       });
                       drawingProvider.startPotentialMove();
                     }
@@ -762,11 +1315,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   }
                 }
                 
-                _lastInteractionPosition = localPosition;
+                _lastInteractionPosition = currentPosition;
               },
 
               onPointerUp: (PointerUpEvent event) {
                 if (!mounted) return;
+                
+                // Check if currently pressing an element and handle animation
+                bool wasPressingElement = _isPressingElement;
+                DrawingElement? pressedElement = _isPressingElement ? _elementBeingInteractedWith : null;
+                
+                // Stop pressure build-up
+                _stopPressureBuild();
                 
                 // Remove the pointer from the active pointers
                 _activePointerPositions.remove(event.pointer);
@@ -798,6 +1358,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       setState(() {
                         _elementBeingInteractedWith = null;
                         _isSelectionInProgress = false;
+                        _isElementElevated = false; // Reset elevation
                       });
                       
                       // Force clear any selection that might have happened
@@ -807,7 +1368,59 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   return;
                 }
                 
-                setState(() { _activePointers--; });
+                // Track element state before we change it
+                bool wasElevated = _isElementElevated;
+                bool hadPoppedOut = _hasPoppedOut;
+                DrawingElement? interactedElement = _elementBeingInteractedWith;
+                
+                // If element was elevated or popped out, start the drop animation
+                if ((wasElevated || hadPoppedOut) && interactedElement != null) {
+                  print("Starting drop animation for ${interactedElement.runtimeType}");
+                  setState(() { 
+                    _isElementElevated = false;
+                    _hasPoppedOut = false;
+                    _isElementDropping = true;
+                  });
+                  
+                  // Provide haptic feedback for the drop
+                  HapticFeedback.lightImpact();
+                  
+                  // Use a short animation to show the element dropping
+                  Future.delayed(Duration(milliseconds: 150), () {
+                    if (mounted) {
+                      setState(() {
+                        _isElementDropping = false;
+                        _elementBeingInteractedWith = null;
+                      });
+                    }
+                  });
+                } else if (wasPressingElement && pressedElement != null && !hadPoppedOut) {
+                  // Element was pressed but never popped - just handle as a tap
+                  print("Element was pressed but not popped, handling as tap");
+                  setState(() { 
+                    _isElementElevated = false;
+                    _hasPoppedOut = false;
+                  });
+                  
+                  // Simple selection feedback
+                  HapticFeedback.selectionClick();
+                  
+                  // Select the element briefly then clear selection
+                  drawingProvider.selectElement(pressedElement);
+                  Future.delayed(Duration(milliseconds: 300), () {
+                    drawingProvider.clearSelection();
+                  });
+                } else {
+                  // Not elevated or interacting - just reset state
+                  setState(() { 
+                    _isElementElevated = false;
+                    _hasPoppedOut = false;
+                  });
+                }
+                
+                setState(() { 
+                  _activePointers--; 
+                });
                 
                 final Offset upPosition = event.localPosition;
                 final tapPosition = _potentialInteractionStartPosition ?? upPosition;
@@ -816,7 +1429,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 bool wasResizing = _isResizingElement;
                 bool wasRotating = _isRotatingElement;
                 bool wasSelecting = _isSelectionInProgress;
-                DrawingElement? interactedElement = _elementBeingInteractedWith;
 
                 // If we drop to 0 or 1 pointer while rotating, end the rotation
                 if (wasRotating && _activePointers < 2) {
@@ -899,6 +1511,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerCancel: (PointerCancelEvent event) {
                 if (!mounted) return;
                 
+                // Stop pressure build-up
+                _stopPressureBuild();
+                
                 // Remove this pointer from tracking
                 _activePointerPositions.remove(event.pointer);
                 
@@ -969,6 +1584,29 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     
                     final List<Widget> elementWidgets = [];
                     
+                    // Replace the SelectionPainter with our new ShadowPainter for all elements
+                    elementWidgets.add(
+                      RepaintBoundary(
+                        child: CustomPaint(
+                          painter: ShadowPainter(element: element, currentTransform: transform),
+                          size: Size.infinite,
+                        ),
+                      ),
+                    );
+                    
+                    // Add selection border only for selected elements
+                    if (isSelected) {
+                      elementWidgets.add(
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: SelectionBorderPainter(element: element, currentTransform: transform),
+                            size: Size.infinite,
+                          ),
+                        ),
+                      );
+                    }
+                    
+                    // Then add the actual element widget on TOP of the shadow
                     final elementWidget = RepaintBoundary(
                       child: CustomPaint(
                         painter: ElementPainter(element: element, currentTransform: transform),
@@ -976,44 +1614,132 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       ),
                     );
                     
-                    elementWidgets.add(
-                      shouldAnimate
-                        ? TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 1.0, end: animationScale),
-                            duration: const Duration(milliseconds: 100),
-                            builder: (context, scale, child) {
-                              return Transform.scale(
-                                scale: scale,
-                                alignment: Alignment.center,
-                                child: child,
-                              );
-                            },
-                            child: elementWidget,
-                          )
-                        : elementWidget,
-                    );
-                    if (isSelected) {
-                      elementWidgets.add(
-                        RepaintBoundary(
-                          child: CustomPaint(
-                            painter: SelectionPainter(element: element, currentTransform: transform),
-                            size: Size.infinite,
-                          ),
+                    // Apply "pop out" elevation effect when the element is being moved/dragged
+                    final bool shouldElevate = element.id == _elementBeingInteractedWith?.id && 
+                                              (_isMovingElement || _isResizingElement || _isRotatingElement);
+                    
+                    // Calculate how much to lift the element
+                    final double scale = transform.getMaxScaleOnAxis();
+                    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
+                    final double elevationOffset = shouldElevate ? (elevationAmount * inverseScale) : 0.0;
+                    
+                    // Check if this element is in the dropping animation
+                    final bool isDropping = _isElementDropping && element.id == _elementBeingInteractedWith?.id;
+                    
+                    // Wrap the element with necessary transforms
+                    Widget elevatedElement;
+                    bool shouldShowEffects = shouldElevate || shouldAnimate || isDropping;
+                    bool isBeingPressed = element.id == _elementBeingInteractedWith?.id && _isPressingElement;
+                    
+                    if (shouldShowEffects || isBeingPressed) {
+                      // Calculate animation values based on state
+                      double beginScale = 1.0;
+                      double endScale = 1.0;
+                      double translateY = 0.0;
+                      Curve curve = Curves.easeOutCubic;
+                      Duration duration = Duration(milliseconds: 200);
+                      
+                      if (isDropping) {
+                        // Dropping animation
+                        beginScale = 1.03;
+                        endScale = 1.0;
+                        translateY = 0.0;
+                        curve = Curves.easeInCubic;
+                        duration = Duration(milliseconds: 150);
+                      } else if (_hasPoppedOut) {
+                        // Popped out state - more dramatic with spring effect
+                        beginScale = shouldAnimate ? 1.0 : (shouldElevate ? 0.97 : 1.05);
+                        endScale = shouldAnimate ? animationScale : (shouldElevate ? 1.15 : 1.08);
+                        translateY = -elevationOffset * 1.3; // Increase elevation for popped state
+                        curve = Curves.elasticOut;
+                        duration = Duration(milliseconds: 350); // Longer for spring animation
+                      } else if (isBeingPressed) {
+                        // Being pressed, building pressure - make this more dramatic
+                        double pressureValue = _pressureController.value;
+                        
+                        // Transform pressure value (0.0-1.0) into visual scaling effects
+                        // Create a visible build-up before the pop
+                        double pressureScale;
+                        
+                        if (pressureValue < 0.3) {
+                          // Initial phase - subtle compression (gets smaller)
+                          pressureScale = 1.0 - 0.03 * (pressureValue / 0.3);
+                        } else if (pressureValue < 0.6) {
+                          // Middle phase - starts expanding slowly
+                          double t = (pressureValue - 0.3) / 0.3;
+                          pressureScale = 0.97 + 0.05 * t;
+                        } else if (pressureValue < _pressureThreshold) {
+                          // Pre-pop phase - noticeable pulsing effect
+                          double pulsePhase = ((pressureValue - 0.6) / 0.2) * 2 * math.pi;
+                          double pulseAmplitude = 0.02;
+                          pressureScale = 1.02 + pulseAmplitude * math.sin(pulsePhase);
+                        } else {
+                          // About to pop
+                          pressureScale = 1.05;
+                        }
+                        
+                        beginScale = pressureScale;
+                        endScale = pressureScale;
+                        
+                        // Elevation follows pressure more dramatically
+                        translateY = -elevationOffset * math.pow(pressureValue, 2) * 0.4;
+                        
+                        curve = Curves.easeInCubic;
+                        duration = Duration(milliseconds: 16);
+                      }
+                      
+                      elevatedElement = Transform.translate(
+                        offset: Offset(0, translateY),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(begin: beginScale, end: endScale),
+                          duration: duration,
+                          curve: curve,
+                          builder: (context, scale, child) {
+                            return Transform.scale(
+                              scale: scale,
+                              alignment: Alignment.center,
+                              child: child,
+                            );
+                          },
+                          child: elementWidget,
                         ),
                       );
+                    } else {
+                      // No effects - return element as is
+                      elevatedElement = elementWidget;
                     }
+                    
+                    // Debug for pressure animation
+                    if (isBeingPressed) {
+                      print("Pressure value: ${_pressureController.value}, HasPopped: $_hasPoppedOut");
+                    }
+                    
+                    elementWidgets.add(elevatedElement);
+                    
                     return Stack(
                       key: ValueKey('element-${element.id}-$index'),
                       children: elementWidgets
                     );
-                  }),
+                  }).toList(),
                   if (currentDrawingElement != null)
-                     RepaintBoundary(
-                       child: CustomPaint(
-                          painter: ElementPainter(element: currentDrawingElement, currentTransform: transform),
-                          size: Size.infinite,
-                       ),
-                     ),
+                    Stack(
+                      children: [
+                        // Add shadow to the current drawing element
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: ShadowPainter(element: currentDrawingElement, currentTransform: transform),
+                            size: Size.infinite,
+                          ),
+                        ),
+                        // And the actual element on top
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: ElementPainter(element: currentDrawingElement, currentTransform: transform),
+                            size: Size.infinite,
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -1292,71 +2018,6 @@ class ElementPainter extends CustomPainter {
   
   @override
   bool shouldRepaint(covariant ElementPainter oldDelegate) {
-    return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
-  }
-}
-
-class SelectionPainter extends CustomPainter {
-  final DrawingElement element;
-  final Matrix4 currentTransform;
-
-  SelectionPainter({required this.element, required this.currentTransform});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double scale = currentTransform.getMaxScaleOnAxis();
-    final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
-    final Rect bounds = element.bounds;
-    if (bounds.isEmpty) return;
-    
-    canvas.save();
-    
-    if (element.rotation != 0) {
-      final center = element.bounds.center;
-      canvas.translate(center.dx, center.dy);
-      canvas.rotate(element.rotation);
-      canvas.translate(-center.dx, -center.dy);
-    }
-    
-    final Paint outlinePaint = Paint()
-      ..color = Colors.blue.withOpacity(0.6)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 * inverseScale;
-    
-    if (element is PenElement) {
-      final pen = element as PenElement;
-      if (pen.points.length >= 2) {
-        final path = Path();
-        path.moveTo(pen.points.first.dx, pen.points.first.dy);
-        for (int i = 1; i < pen.points.length; i++) {
-          path.lineTo(pen.points[i].dx, pen.points[i].dy);
-        }
-        outlinePaint.strokeWidth = (pen.strokeWidth + 2) * inverseScale;
-        canvas.drawPath(path, outlinePaint);
-      }
-    } else if (element is TextElement || element is NoteElement) {
-      final rect = bounds.inflate(1 * inverseScale);
-      final radius = Radius.circular(8 * inverseScale);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, radius),
-        outlinePaint
-      );
-    } else if (element is ImageElement || element is VideoElement || element is GifElement) {
-      final rect = bounds.inflate(1 * inverseScale);
-      final radius = Radius.circular(4 * inverseScale);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, radius),
-        outlinePaint
-      );
-    } else {
-      canvas.drawRect(bounds.inflate(1 * inverseScale), outlinePaint);
-    }
-    
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant SelectionPainter oldDelegate) {
     return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
   }
 }

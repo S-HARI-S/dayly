@@ -72,14 +72,8 @@ class ImageElement extends DrawingElement {
       canvas.drawImageRect(image!, srcRect, dstRect, paint);
     });
 
-    // Optional: Draw selection highlight
-    if (isSelected) {
-      final selectionPaint = Paint()
-        ..color = Colors.blue.withAlpha(80)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5 * inverseScale;
-      canvas.drawRect(bounds, selectionPaint);
-    }
+    // Remove selection highlight since SelectionPainter will handle this
+    // The selection shadow will be drawn by SelectionPainter
   }
 
   @override
