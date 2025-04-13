@@ -16,6 +16,11 @@ enum ResizeHandleType {
 
 // Helper function to calculate the positions (Rects) of handles based on element bounds
 Map<ResizeHandleType, Rect> calculateHandles(Rect bounds, double handleSize) {
+  // Return empty map to disable all handles
+  return {};
+
+  // Original implementation:
+  /*
   // Return empty map if bounds are invalid or too small
   if (bounds.isEmpty || bounds.width < handleSize || bounds.height < handleSize) {
     return {};
@@ -44,4 +49,5 @@ Map<ResizeHandleType, Rect> calculateHandles(Rect bounds, double handleSize) {
   };
 
   return result;
+  */
 }

@@ -1003,40 +1003,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
                 } else if (_activePointers == 1) {
                   final currentTool = drawingProvider.currentTool;
                 
-                  // Check if any handle is being touched
-                  if (drawingProvider.selectedElementIds.length == 1 && currentTool == ElementType.none) {
-                    final selectedElement = elements.firstWhereOrNull(
-                      (el) => el.id == selectedElementIds.first
-                    );
-                    
-                    if (selectedElement != null) {
-                      final double scale = transform.getMaxScaleOnAxis();
-                      final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
-                      _draggedHandle = _hitTestHandles(selectedElement, localPosition, inverseScale);
-                      
-                      if (_draggedHandle != null) {
-                        setState(() { 
-                          if (_draggedHandle == ResizeHandleType.rotate) {
-                            _isRotatingElement = true;
-                            final elementCenter = selectedElement.bounds.center;
-                            _startRotationAngle = _calculateAngle(elementCenter, localPosition) - selectedElement.rotation;
-                          } else {
-                            _isResizingElement = true;
-                          }
-                          _elementBeingInteractedWith = selectedElement; 
-                        });
-                        
-                        if (_isRotatingElement) {
-                          drawingProvider.startPotentialRotation();
-                        } else {
-                          drawingProvider.startPotentialResize();
-                        }
-                        
-                        HapticFeedback.mediumImpact();
-                        return; // Exit early since we're handling a resize
-                      }
-                    }
-                  }
+                  // Remove handle touch detection - we're using two-finger gestures exclusively for resize/rotate
                   
                   // If not handling resize, check if we're clicking on an element
                   if (currentTool == ElementType.none) {
@@ -1147,8 +1114,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
                         _showRadialMenu(context, drawingProvider, hitElement, globalPosition);
                       });
                     } else {
-                      // Tapped on empty space, clear selection
-                      drawingProvider.clearSelection();
+                      // Tapped on empty space, do NOT clear selection on single tap
+                      // This removes single-tap selection clearing
                     }
                   } else if (currentTool == ElementType.pen) {
                     // Start drawing immediately
