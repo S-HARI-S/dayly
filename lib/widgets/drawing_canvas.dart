@@ -193,81 +193,36 @@ class GridPainter extends CustomPainter {
   }
 }
 
-// Add ShadowPainter class before ElementPainter
+// Update the ShadowPainter class to include isInteracting flag
 class ShadowPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
-  // Define the light source position (fixed at the top)
-  final Offset lightSource = const Offset(0, -5000); // Light is positioned far above the canvas
+  final bool isInteracting;
 
-  ShadowPainter({required this.element, required this.currentTransform});
+  ShadowPainter({
+    required this.element,
+    required this.currentTransform,
+    this.isInteracting = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Only paint shadow if element is being interacted with
+    if (!isInteracting) return;
+    
     final Rect bounds = element.bounds;
     if (bounds.isEmpty) return;
     
     final double scale = currentTransform.getMaxScaleOnAxis();
     final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
     
-    // Calculate shadow parameters based on physics
-    final Offset elementCenter = bounds.center;
-    
-    // Direction from light source to element
-    final Offset lightDirection = elementCenter - lightSource;
-    
-    // Normalize the direction vector
-    final double lightDistance = lightDirection.distance;
-    final Offset normalizedDirection = lightDirection / lightDistance;
-    
-    // Calculate element "height" based on element type
-    // Different elements have different heights above the canvas
-    double elementHeight;
-    
-    // Assign different heights based on element type
-    if (element is TextElement) {
-      elementHeight = 60 * inverseScale; // Increased height for more visible shadow
-    } else if (element is NoteElement) {
-      elementHeight = 100 * inverseScale; // Notes are like sticky notes
-    } else if (element is ImageElement || element is VideoElement || element is GifElement) {
-      elementHeight = 150 * inverseScale; // Media elements float higher
-    } else if (element is PenElement) {
-      elementHeight = 40 * inverseScale; // Pen strokes are close to canvas
-    } else {
-      elementHeight = 80 * inverseScale; // Default height
-    }
-    
-    // Calculate shadow length based on element height and light angle
-    // The shadow length is proportional to the height and the tangent of the light angle
-    final double distanceRatio = lightDistance / 5000;
-    final double shadowLength = elementHeight * distanceRatio * 8.0; // Increased multiplier for longer shadows
-    
-    // Shadow offset is based on normalized direction and shadow length
-    final double offsetX = normalizedDirection.dx * shadowLength;
-    final double offsetY = normalizedDirection.dy * shadowLength;
-    
-    // Shadow blur increases with distance from light and height
-    // Higher objects cast more diffuse shadows
-    final double shadowBlur = 5 * inverseScale * (1 + (elementHeight / 50)) * (1 + (distanceRatio * 0.5)); // Increased base blur
-    
-    // Shadow opacity decreases with distance (simulating light falloff)
-    // and is affected by element type (some are more "transparent")
-    double shadowOpacity = 0.6 * (3000 / (lightDistance + 1000)); // Increased base opacity
-    
-    // Adjust opacity based on element type
-    if (element is PenElement) {
-      shadowOpacity *= 0.8; // Pen strokes have lighter shadows
-    } else if (element is TextElement) {
-      shadowOpacity *= 1.0; // Text has clearer shadows
-    } else if (element is NoteElement) {
-      shadowOpacity *= 1.2; // Notes have stronger shadows
-    }
-    
-    // Cap the opacity to a reasonable range
-    shadowOpacity = shadowOpacity.clamp(0.2, 0.7); // Higher min and max opacity
+    // Simple shadow parameters
+    final double offsetX = 4.0 * inverseScale;
+    final double offsetY = 4.0 * inverseScale;
+    final double shadowBlur = 8.0 * inverseScale;
     
     final Paint shadowPaint = Paint()
-      ..color = Colors.black.withOpacity(shadowOpacity)
+      ..color = Colors.black.withOpacity(0.25)
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur);
     
     canvas.save();
@@ -279,203 +234,40 @@ class ShadowPainter extends CustomPainter {
       canvas.translate(-center.dx, -center.dy);
     }
     
-    // Draw shadow based on element type
     if (element is PenElement) {
       final pen = element as PenElement;
       if (pen.points.length >= 2) {
-        // For pen strokes, create a shadow that follows the stroke
-        final strokeWidth = pen.strokeWidth;
+        final Path shadowPath = Path();
+        shadowPath.moveTo(
+          pen.points.first.dx + offsetX,
+          pen.points.first.dy + offsetY
+        );
         
-        final Paint penShadowPaint = Paint()
-          ..color = Colors.black.withOpacity(shadowOpacity * 1.2) // Increased opacity for pen shadows
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.2) // More blur for softer shadow
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = strokeWidth * 1.5 * inverseScale // Wider shadow for more visibility
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round;
-          
-        final shadowPath = Path();
-        
-        // Start point with physics-based offset
-        final firstPoint = Offset(pen.points.first.dx + offsetX, pen.points.first.dy + offsetY);
-        shadowPath.moveTo(firstPoint.dx, firstPoint.dy);
-        
-        // Connect points with curved paths for smoother shadow
-        if (pen.points.length == 2) {
-          // Simple line for just two points
-          shadowPath.lineTo(pen.points[1].dx + offsetX, pen.points[1].dy + offsetY);
-        } else if (pen.points.length == 3) {
-          // Use quadratic bezier for 3 points
-          final controlPoint = Offset(
-            pen.points[1].dx + offsetX,
-            pen.points[1].dy + offsetY
+        for (int i = 1; i < pen.points.length; i++) {
+          shadowPath.lineTo(
+            pen.points[i].dx + offsetX,
+            pen.points[i].dy + offsetY
           );
-          final endPoint = Offset(
-            pen.points[2].dx + offsetX,
-            pen.points[2].dy + offsetY
-          );
-          shadowPath.quadraticBezierTo(
-            controlPoint.dx, controlPoint.dy,
-            endPoint.dx, endPoint.dy
-          );
-        } else {
-          // For many points, use a smooth curve algorithm
-          // This creates a more natural shadow for pen strokes
-          for (int i = 0; i < pen.points.length - 1; i++) {
-            final p0 = (i > 0) ? pen.points[i - 1] : pen.points[0];
-            final p1 = pen.points[i];
-            final p2 = pen.points[i + 1];
-            final p3 = (i < pen.points.length - 2) ? pen.points[i + 2] : p2;
-            
-            // Calculate control points for a smooth Catmull-Rom spline 
-            // (approximated with cubic bezier)
-            final double tension = 0.5; // Controls how tight the curve is
-            
-            final cp1 = Offset(
-              p1.dx + (p2.dx - p0.dx) * tension / 6,
-              p1.dy + (p2.dy - p0.dy) * tension / 6
-            );
-            
-            final cp2 = Offset(
-              p2.dx - (p3.dx - p1.dx) * tension / 6,
-              p2.dy - (p3.dy - p1.dy) * tension / 6
-            );
-            
-            // Add physics-based shadow offset
-            final shadowP1 = Offset(p1.dx + offsetX, p1.dy + offsetY);
-            final shadowP2 = Offset(p2.dx + offsetX, p2.dy + offsetY);
-            final shadowCp1 = Offset(cp1.dx + offsetX, cp1.dy + offsetY);
-            final shadowCp2 = Offset(cp2.dx + offsetX, cp2.dy + offsetY);
-            
-            if (i == 0) {
-              shadowPath.moveTo(shadowP1.dx, shadowP1.dy);
-            }
-            
-            // Use cubic bezier for smoother curves
-            shadowPath.cubicTo(
-              shadowCp1.dx, shadowCp1.dy,
-              shadowCp2.dx, shadowCp2.dy,
-              shadowP2.dx, shadowP2.dy
-            );
-          }
         }
         
-        // Draw the main shadow
-        canvas.drawPath(shadowPath, penShadowPaint);
-        
-        // Draw a second, more concentrated shadow for added depth
-        final Paint secondaryShadowPaint = Paint()
-          ..color = Colors.black.withOpacity(shadowOpacity * 1.5)
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 0.7)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = strokeWidth * 0.8 * inverseScale
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round;
-          
-        // Calculate a shorter offset for the secondary shadow (closer to the stroke)
-        final double secondaryOffsetRatio = 0.6;
-        final double secondaryOffsetX = offsetX * secondaryOffsetRatio;
-        final double secondaryOffsetY = offsetY * secondaryOffsetRatio;
-        
-        // Create a secondary shadow path
-        final secondaryShadowPath = Path();
-        
-        // Apply the same path generation logic with a shorter offset
-        if (pen.points.length == 2) {
-          secondaryShadowPath.moveTo(pen.points.first.dx + secondaryOffsetX, pen.points.first.dy + secondaryOffsetY);
-          secondaryShadowPath.lineTo(pen.points[1].dx + secondaryOffsetX, pen.points[1].dy + secondaryOffsetY);
-        } else if (pen.points.length == 3) {
-          secondaryShadowPath.moveTo(pen.points.first.dx + secondaryOffsetX, pen.points.first.dy + secondaryOffsetY);
-          secondaryShadowPath.quadraticBezierTo(
-            pen.points[1].dx + secondaryOffsetX, pen.points[1].dy + secondaryOffsetY,
-            pen.points[2].dx + secondaryOffsetX, pen.points[2].dy + secondaryOffsetY
-          );
-        } else {
-          // Apply the same smooth curve algorithm for the secondary shadow
-          for (int i = 0; i < pen.points.length - 1; i++) {
-            final p0 = (i > 0) ? pen.points[i - 1] : pen.points[0];
-            final p1 = pen.points[i];
-            final p2 = pen.points[i + 1];
-            final p3 = (i < pen.points.length - 2) ? pen.points[i + 2] : p2;
-            
-            final cp1 = Offset(
-              p1.dx + (p2.dx - p0.dx) * 0.5 / 6,
-              p1.dy + (p2.dy - p0.dy) * 0.5 / 6
-            );
-            
-            final cp2 = Offset(
-              p2.dx - (p3.dx - p1.dx) * 0.5 / 6,
-              p2.dy - (p3.dy - p1.dy) * 0.5 / 6
-            );
-            
-            final sShadowP1 = Offset(p1.dx + secondaryOffsetX, p1.dy + secondaryOffsetY);
-            final sShadowP2 = Offset(p2.dx + secondaryOffsetX, p2.dy + secondaryOffsetY);
-            final sShadowCp1 = Offset(cp1.dx + secondaryOffsetX, cp1.dy + secondaryOffsetY);
-            final sShadowCp2 = Offset(cp2.dx + secondaryOffsetX, cp2.dy + secondaryOffsetY);
-            
-            if (i == 0) {
-              secondaryShadowPath.moveTo(sShadowP1.dx, sShadowP1.dy);
-            }
-            
-            secondaryShadowPath.cubicTo(
-              sShadowCp1.dx, sShadowCp1.dy,
-              sShadowCp2.dx, sShadowCp2.dy,
-              sShadowP2.dx, sShadowP2.dy
-            );
-          }
-        }
-        
-        // Draw the secondary shadow
-        canvas.drawPath(secondaryShadowPath, secondaryShadowPaint);
+        canvas.drawPath(
+          shadowPath,
+          shadowPaint
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = (pen.strokeWidth + 2) * inverseScale
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round
+        );
       }
     } else {
-      // For rectangular elements like TextElement, NoteElement, ImageElement, etc.
-      final rect = bounds;
-      final radius = element is TextElement || element is NoteElement 
+      final Rect shadowRect = bounds.translate(offsetX, offsetY);
+      final radius = element is TextElement || element is NoteElement
           ? Radius.circular(8 * inverseScale)
           : Radius.circular(4 * inverseScale);
       
-      // Create a layered shadow effect for greater depth
-      
-      // Outer shadow (more diffuse)
-      final outerShadowPaint = Paint()
-        ..color = Colors.black.withOpacity(shadowOpacity * 0.7)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.5);
-        
-      // Middle shadow
-      final middleShadowPaint = Paint()
-        ..color = Colors.black.withOpacity(shadowOpacity * 0.85)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 1.1);
-        
-      // Inner shadow (sharper)
-      final innerShadowPaint = Paint()
-        ..color = Colors.black.withOpacity(shadowOpacity * 1.0)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur * 0.7);
-      
-      // Calculate offset for each shadow layer
-      final outerOffset = Offset(offsetX, offsetY);
-      final middleOffset = Offset(offsetX * 0.8, offsetY * 0.8);
-      final innerOffset = Offset(offsetX * 0.6, offsetY * 0.6);
-      
-      // Draw shadow with physics-based offset - outer layer
-      final outerShadowRect = rect.translate(outerOffset.dx, outerOffset.dy);
       canvas.drawRRect(
-        RRect.fromRectAndRadius(outerShadowRect, radius),
-        outerShadowPaint
-      );
-      
-      // Middle layer
-      final middleShadowRect = rect.translate(middleOffset.dx, middleOffset.dy);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(middleShadowRect, radius),
-        middleShadowPaint
-      );
-      
-      // Inner layer
-      final innerShadowRect = rect.translate(innerOffset.dx, innerOffset.dy);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(innerShadowRect, radius),
-        innerShadowPaint
+        RRect.fromRectAndRadius(shadowRect, radius),
+        shadowPaint
       );
     }
     
@@ -485,19 +277,27 @@ class ShadowPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant ShadowPainter oldDelegate) {
     return element != oldDelegate.element || 
-           currentTransform != oldDelegate.currentTransform;
+           currentTransform != oldDelegate.currentTransform ||
+           isInteracting != oldDelegate.isInteracting;
   }
 }
 
-// Add SelectionBorderPainter to handle selection borders
+// Update the SelectionBorderPainter to only show when needed
 class SelectionBorderPainter extends CustomPainter {
   final DrawingElement element;
   final Matrix4 currentTransform;
+  final bool isInteracting;
 
-  SelectionBorderPainter({required this.element, required this.currentTransform});
+  SelectionBorderPainter({
+    required this.element,
+    required this.currentTransform,
+    this.isInteracting = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (!isInteracting) return; // Only paint when interacting
+    
     final double scale = currentTransform.getMaxScaleOnAxis();
     final double inverseScale = (scale.abs() < 1e-6) ? 1.0 : 1.0 / scale;
     final Rect bounds = element.bounds;
@@ -512,16 +312,14 @@ class SelectionBorderPainter extends CustomPainter {
       canvas.translate(-center.dx, -center.dy);
     }
     
-    // Draw selection outline with a clear blue color
     final selectionPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.8)
+      ..color = Colors.blue.withOpacity(0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2 * inverseScale;
+      ..strokeWidth = 1.0 * inverseScale;
     
     if (element is PenElement) {
       final pen = element as PenElement;
       if (pen.points.length >= 2) {
-        // Draw selection outline for pen strokes
         final Path path = Path();
         path.moveTo(pen.points.first.dx, pen.points.first.dy);
         
@@ -531,19 +329,14 @@ class SelectionBorderPainter extends CustomPainter {
         
         canvas.drawPath(
           path,
-          selectionPaint..strokeWidth = (pen.strokeWidth + 4) * inverseScale
+          selectionPaint..strokeWidth = (pen.strokeWidth + 1) * inverseScale
         );
       }
-    } else if (element is TextElement || element is NoteElement) {
-      // Draw rounded rectangle for text and notes
-      final radius = Radius.circular(8 * inverseScale);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(bounds, radius),
-        selectionPaint
-      );
     } else {
-      // For other elements
-      final radius = Radius.circular(4 * inverseScale);
+      final radius = element is TextElement || element is NoteElement
+          ? Radius.circular(8 * inverseScale)
+          : Radius.circular(4 * inverseScale);
+      
       canvas.drawRRect(
         RRect.fromRectAndRadius(bounds, radius),
         selectionPaint
@@ -555,7 +348,9 @@ class SelectionBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SelectionBorderPainter oldDelegate) {
-    return element != oldDelegate.element || currentTransform != oldDelegate.currentTransform;
+    return element != oldDelegate.element ||
+           currentTransform != oldDelegate.currentTransform ||
+           isInteracting != oldDelegate.isInteracting;
   }
 }
 
@@ -596,18 +391,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
   static const double animationScale = 1.05; // Scale factor for selection pop effect
   
   // Physical interaction properties
-  static const double elevationAmount = 20.0; // Increased lift amount for more dramatic effect
-  bool _isElementElevated = false; // Track if element is currently lifted
-  bool _isElementDropping = false; // Track if element is in dropping animation
+  static const double elevationAmount = 15.0; // Slightly reduced lift amount for subtler effect
+  bool _isElementElevated = false;
+  bool _isElementDropping = false;
   
   // Pressure build-up animation properties
   late AnimationController _pressureController;
-  Timer? _pressureTimer; // Dedicated timer for pressure animation
-  double _pressureThreshold = 0.8; // Increased threshold to make the pop more dramatic
-  bool _isPressingElement = false; // Track if element is currently being pressed
-  bool _hasPoppedOut = false; // Track if the element has popped out
-  int _pressureUpdateCounter = 0; // Counter for pressure updates
-  static const int pressureThresholdTime = 450; // Time in ms until pop occurs
+  Timer? _pressureTimer;
+  double _pressureThreshold = 0.7; // Reduced threshold for quicker response
+  bool _isPressingElement = false;
+  bool _hasPoppedOut = false;
+  int _pressureUpdateCounter = 0;
+  static const int pressureThresholdTime = 350; // Reduced time for faster response
 
   // State for RadialMenu display
   OverlayEntry? _radialMenuOverlay;
@@ -808,11 +603,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
   void _popEffectAnimation() {
     if (!mounted || _elementBeingInteractedWith == null) return;
     
-    // Animate the controller to slightly overshoot and bounce back
+    // Animate the controller with a more subtle spring effect
     _pressureController.animateTo(
-      1.0, // Full value
-      duration: Duration(milliseconds: 300),
-      curve: Curves.elasticOut, // Spring effect
+      1.0,
+      duration: Duration(milliseconds: 250), // Faster animation
+      curve: Curves.easeOutBack, // Changed to easeOutBack for more controlled bounce
     );
   }
   
@@ -1551,39 +1346,38 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
                     
                     final List<Widget> elementWidgets = [];
                     
-                    // Replace the SelectionPainter with our new ShadowPainter for all elements
+                    // Update shadow layer to only show during interaction
+                    final bool isInteracting = isSelected || 
+                                              element.id == _elementBeingInteractedWith?.id ||
+                                              (_isMovingElement && selectedElementIds.contains(element.id));
+                    
                     elementWidgets.add(
                       RepaintBoundary(
                         child: CustomPaint(
-                          painter: ShadowPainter(element: element, currentTransform: transform),
+                          painter: ShadowPainter(
+                            element: element,
+                            currentTransform: transform,
+                            isInteracting: isInteracting,
+                          ),
                           size: Size.infinite,
                         ),
                       ),
                     );
                     
-                    // Add selection border only for selected elements
-                    if (isSelected) {
-                      elementWidgets.add(
-                        RepaintBoundary(
-                          child: CustomPaint(
-                            painter: SelectionBorderPainter(element: element, currentTransform: transform),
-                            size: Size.infinite,
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // Then add the actual element widget on TOP of the shadow
+                    // Then add the actual element on top of its shadow
                     final elementWidget = RepaintBoundary(
                       child: CustomPaint(
-                        painter: ElementPainter(element: element, currentTransform: transform),
+                        painter: ElementPainter(
+                          element: element,
+                          currentTransform: transform,
+                        ),
                         size: Size.infinite,
                       ),
                     );
                     
                     // Apply "pop out" elevation effect when the element is being moved/dragged
                     final bool shouldElevate = element.id == _elementBeingInteractedWith?.id && 
-                                              (_isMovingElement || _isResizingElement || _isRotatingElement);
+                                             (_isMovingElement || _isResizingElement || _isRotatingElement);
                     
                     // Calculate how much to lift the element
                     final double scale = transform.getMaxScaleOnAxis();
@@ -1607,51 +1401,41 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
                       Duration duration = Duration(milliseconds: 200);
                       
                       if (isDropping) {
-                        // Dropping animation
-                        beginScale = 1.03;
+                        // Dropping animation - more subtle
+                        beginScale = 1.02;
                         endScale = 1.0;
                         translateY = 0.0;
-                        curve = Curves.easeInCubic;
-                        duration = Duration(milliseconds: 150);
+                        curve = Curves.easeOutQuint;
+                        duration = Duration(milliseconds: 200);
                       } else if (_hasPoppedOut) {
-                        // Popped out state - more dramatic with spring effect
-                        beginScale = shouldAnimate ? 1.0 : (shouldElevate ? 0.97 : 1.05);
-                        endScale = shouldAnimate ? animationScale : (shouldElevate ? 1.15 : 1.08);
-                        translateY = -elevationOffset * 1.3; // Increase elevation for popped state
-                        curve = Curves.elasticOut;
-                        duration = Duration(milliseconds: 350); // Longer for spring animation
+                        // Popped out state - more subtle with controlled spring
+                        beginScale = shouldAnimate ? 1.0 : (shouldElevate ? 0.98 : 1.03);
+                        endScale = shouldAnimate ? animationScale : (shouldElevate ? 1.1 : 1.05);
+                        translateY = -elevationOffset * 1.2;
+                        curve = Curves.easeOutBack;
+                        duration = Duration(milliseconds: 300);
                       } else if (isBeingPressed) {
-                        // Being pressed, building pressure - make this more dramatic
+                        // Being pressed - smoother pressure build-up
                         double pressureValue = _pressureController.value;
-                        
-                        // Transform pressure value (0.0-1.0) into visual scaling effects
-                        // Create a visible build-up before the pop
                         double pressureScale;
                         
                         if (pressureValue < 0.3) {
-                          // Initial phase - subtle compression (gets smaller)
-                          pressureScale = 1.0 - 0.03 * (pressureValue / 0.3);
+                          pressureScale = 1.0 - 0.02 * (pressureValue / 0.3);
                         } else if (pressureValue < 0.6) {
-                          // Middle phase - starts expanding slowly
                           double t = (pressureValue - 0.3) / 0.3;
-                          pressureScale = 0.97 + 0.05 * t;
+                          pressureScale = 0.98 + 0.03 * t;
                         } else if (pressureValue < _pressureThreshold) {
-                          // Pre-pop phase - noticeable pulsing effect
                           double pulsePhase = ((pressureValue - 0.6) / 0.2) * 2 * math.pi;
-                          double pulseAmplitude = 0.02;
-                          pressureScale = 1.02 + pulseAmplitude * math.sin(pulsePhase);
+                          double pulseAmplitude = 0.01;
+                          pressureScale = 1.01 + pulseAmplitude * math.sin(pulsePhase);
                         } else {
-                          // About to pop
-                          pressureScale = 1.05;
+                          pressureScale = 1.03;
                         }
                         
                         beginScale = pressureScale;
                         endScale = pressureScale;
-                        
-                        // Elevation follows pressure more dramatically
-                        translateY = -elevationOffset * math.pow(pressureValue, 2) * 0.4;
-                        
-                        curve = Curves.easeInCubic;
+                        translateY = -elevationOffset * math.pow(pressureValue, 2) * 0.3;
+                        curve = Curves.easeInOutCubic;
                         duration = Duration(milliseconds: 16);
                       }
                       
@@ -1672,20 +1456,29 @@ class _DrawingCanvasState extends State<DrawingCanvas> with SingleTickerProvider
                         ),
                       );
                     } else {
-                      // No effects - return element as is
                       elevatedElement = elementWidget;
-                    }
-                    
-                    // Debug for pressure animation
-                    if (isBeingPressed) {
-                      print("Pressure value: ${_pressureController.value}, HasPopped: $_hasPoppedOut");
                     }
                     
                     elementWidgets.add(elevatedElement);
                     
+                    // Add selection border on top if selected
+                    if (isSelected) {
+                      elementWidgets.add(
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            painter: SelectionBorderPainter(
+                              element: element,
+                              currentTransform: transform,
+                            ),
+                            size: Size.infinite,
+                          ),
+                        ),
+                      );
+                    }
+                    
                     return Stack(
                       key: ValueKey('element-${element.id}-$index'),
-                      children: elementWidgets
+                      children: elementWidgets,
                     );
                   }).toList(),
                   if (currentDrawingElement != null)
